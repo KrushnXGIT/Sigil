@@ -1,0 +1,187 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sigil-os"
+version = "0.1.0a0"
+description = "Sigil — hand-gesture control system for Windows. Layered perception, intelligence, and interpretation."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "Sigil contributors" }]
+keywords = ["gesture", "hci", "computer-vision", "mediapipe", "accessibility"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video :: Capture",
+    "Topic :: Scientific/Engineering :: Human Machine Interfaces",
+]
+
+# Phase 0+1 dependencies. numpy is core because the perception types/utils
+# (LandmarkFrame, One Euro Filter, normalization) use it everywhere. onnxruntime
+# is core because every Sigil runtime needs to load ONNX classifiers.
+dependencies = [
+    "pydantic>=2.9",
+    "pyyaml>=6.0.2",
+    "structlog>=24.4",
+    "click>=8.1",
+    "rich>=13.9",
+    "platformdirs>=4.3",
+    # numpy<2 because mediapipe 0.10.x pins it that way; relax when MP supports numpy 2.
+    "numpy>=1.26,<2.0",
+    # ONNX Runtime CPU EP — runtime inference for the gesture classifier.
+    "onnxruntime>=1.20",
+    "onnxscript>=0.5.0",
+    "ml-dtypes>=0.5.0",
+]
+
+[project.optional-dependencies]
+# Layer 1 — perception (camera + landmarks). Adds cv2 + mediapipe on top of core.
+perception = [
+    "mediapipe>=0.10.18",
+    "opencv-python>=4.10",
+]
+
+# Layer 2 (training-time only) — PyTorch + dataset tooling. NOT needed at
+# runtime; the daemon only loads ONNX (already in core deps).
+training = [
+    "torch>=2.5",
+    "torchvision>=0.20",
+    "pyarrow>=18.0",     # parquet for landmark caches
+    "requests>=2.32",    # dataset downloads
+    "tqdm>=4.67",        # progress bars
+    "scikit-learn>=1.5", # train/val/test splitting utilities
+    "remotezip>=0.12",   # range-request image sampling for alignment verify
+]
+
+# Layer 3 — executor (Windows OS control)
+executor = [
+    "pynput>=1.7.7",
+    "pywin32>=308; sys_platform == 'win32'",
+    "psutil>=6.1",
+]
+
+# Wake word subsystem
+wakeword = [
+    "openwakeword>=0.6",
+    "sounddevice>=0.5",
+]
+
+# HUD / config UI
+ui = [
+    "PyQt6>=6.7",
+]
+
+# Convenience: everything for full local development
+all = [
+    "sigil-os[perception,training,executor,wakeword,ui]",
+]
+
+# Development tooling
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pre-commit>=4.0",
+    "types-pyyaml>=6.0",
+]
+
+[project.scripts]
+sigil = "sigil.cli.main:cli"
+
+[project.urls]
+Homepage = "https://github.com/sigil-gesture/sigil"
+Documentation = "https://github.com/sigil-gesture/sigil/tree/main/docs"
+Issues = "https://github.com/sigil-gesture/sigil/issues"
+
+# ---------------------------------------------------------------------------
+# Hatchling — src layout
+# ---------------------------------------------------------------------------
+[tool.hatch.build.targets.wheel]
+packages = ["src/sigil"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"configs/defaults" = "sigil/_bundled_configs"
+
+# ---------------------------------------------------------------------------
+# Ruff — single source of truth for lint + format
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+extend-exclude = ["models", "datasets"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "UP",
+    "B",
+]
+
+ignore = [
+    "S101",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S"]
+"src/sigil/cli/**" = ["T201"]
+"__init__.py" = ["F401"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+# ---------------------------------------------------------------------------
+# MyPy — strict by default
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+show_error_codes = true
+pretty = true
+files = ["src"]
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-config",
+    "--strict-markers",
+    "--cov=sigil",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-report=xml",
+]
+markers = [
+    "slow: long-running tests (deselect with -m 'not slow')",
+    "windows_only: requires Windows OS",
+    "integration: requires external resources (camera, mic)",
+]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+branch = true
+source = ["sigil"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]

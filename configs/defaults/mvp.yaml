@@ -1,0 +1,79 @@
+# Sigil — MVP tier default configuration.
+#
+# Shipped with the package as `_bundled_configs/mvp.yaml`. The loader uses this
+# as the base layer; user overrides at %APPDATA%/SigilGesture/gestures.yaml are
+# applied on top.
+#
+# Spec reference: docs/gesture-vocabulary-spec.md §4 (Tier 1 — MVP Vocabulary)
+
+version: 1
+tier: mvp
+
+mappings:
+  # --- Reserved (Tier 0, locked) ---
+  - gesture: open_palm
+    action: meta.cancel
+    locked: true
+
+  - gesture: thumbs_up
+    action: meta.confirm
+    locked: true
+
+  - gesture: thumbs_down
+    action: meta.undo
+    locked: true
+
+  # --- Tier 1 statics ---
+  - gesture: fist
+    action: media.play_pause
+
+  - gesture: peace
+    action: media.mute
+
+  - gesture: ok
+    action: window.maximize_toggle
+
+detection:
+  defaults:
+    static:
+      min_confidence: 0.85
+      min_frames: 3
+    dynamic:
+      window_frames: 16
+      min_displacement_px: 200
+      max_duration_ms: 500
+      min_velocity_px_s: 400
+  # Reserved gestures use a stricter threshold so accidental misfires
+  # of "cancel" or "confirm" are very unlikely.
+  overrides:
+    open_palm:
+      min_confidence: 0.90
+      min_frames: 4
+    thumbs_up:
+      min_confidence: 0.90
+      min_frames: 4
+    thumbs_down:
+      min_confidence: 0.90
+      min_frames: 4
+
+state:
+  listening_timeout_s: 60
+  confirming_timeout_s: 3
+  undo_window_s: 3
+  debounce_ms: 400
+
+destructive_actions:
+  - window.close
+  - browser.close_tab
+  - system.lock
+  - system.sleep
+
+wake:
+  keyword: "gesture on"
+  model: openwakeword
+  sensitivity: 0.6
+  cooldown_ms: 500
+
+feedback:
+  audio: subtle_beep
+  hud: always

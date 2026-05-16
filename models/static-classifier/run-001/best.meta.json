@@ -1,0 +1,52 @@
+{
+  "format_version": 1,
+  "protocol_version": 3,
+  "model_version": 1,
+  "opset_version": 17,
+  "input_name": "landmarks",
+  "input_shape": [
+    "batch",
+    21,
+    2
+  ],
+  "input_dtype": "float32",
+  "output_name": "logits",
+  "output_shape": [
+    "batch",
+    7
+  ],
+  "output_dtype": "float32",
+  "normalization": {
+    "scheme": "palm-centroid origin, mean-anchor-distance scale",
+    "anchors": [
+      "WRIST",
+      "INDEX_MCP",
+      "MIDDLE_MCP",
+      "RING_MCP",
+      "PINKY_MCP"
+    ],
+    "see": "src/sigil/perception/normalize.py"
+  },
+  "label_map": {
+    "0": "fist",
+    "1": "no_gesture",
+    "2": "ok",
+    "3": "open_palm",
+    "4": "peace",
+    "5": "thumbs_down",
+    "6": "thumbs_up"
+  },
+  "num_classes": 7,
+  "num_parameters": 140167,
+  "size_fp32_mb": 0.535,
+  "validation": {
+    "batch_sizes": [
+      1,
+      4,
+      16
+    ],
+    "max_pytorch_onnx_diff": 3.0994415283203125e-06,
+    "tolerance": 0.0001
+  },
+  "source_checkpoint": "best.pt"
+}

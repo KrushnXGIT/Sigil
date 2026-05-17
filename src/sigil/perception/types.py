@@ -142,15 +142,27 @@ class HandLandmarks:
         keypoints: (21, 2) float32 array of (x, y) coordinates, normalized
             image coordinates in [0, 1]. MediaPipe's z (depth) estimate is
             dropped at the capture boundary — see ADR-0003.
+            NOTE: when the pipeline applies palm-centroid normalisation
+            (ADR-0004, default), these are NOT raw image coordinates but
+            rather palm-relative coordinates with the centroid at the
+            origin. The `image_palm_centroid` field preserves the
+            pre-normalisation centroid for consumers that need image-
+            space position (e.g. swipe-motion detection).
         handedness: "left" or "right" as reported by MediaPipe.
         detection_confidence: model's confidence the hand is present, [0, 1].
         handedness_confidence: model's confidence in the left/right label, [0, 1].
+        image_palm_centroid: pre-normalisation palm centroid in raw
+            image-normalised coordinates [0, 1]. Populated by the pipeline
+            before palm-centroid normalisation is applied to keypoints.
+            None for HandLandmarks constructed outside the pipeline
+            (e.g. in tests, or when normalisation is disabled).
     """
 
     keypoints: NDArray[np.float32]
     handedness: Handedness
     detection_confidence: float
     handedness_confidence: float = 1.0
+    image_palm_centroid: NDArray[np.float32] | None = None
 
     def __post_init__(self) -> None:
         # Validate shape and dtype upfront — bad data here causes confusing
@@ -164,6 +176,12 @@ class HandLandmarks:
             raise ValueError(f"keypoints must be float32, got {self.keypoints.dtype}")
         if not 0.0 <= self.detection_confidence <= 1.0:
             raise ValueError(f"detection_confidence out of range: {self.detection_confidence}")
+        if self.image_palm_centroid is not None:
+            if self.image_palm_centroid.shape != (N_COORDS,):
+                raise ValueError(
+                    f"image_palm_centroid must have shape ({N_COORDS},), "
+                    f"got {self.image_palm_centroid.shape}"
+                )
 
     @property
     def wrist(self) -> NDArray[np.float32]:
@@ -178,6 +196,10 @@ class HandLandmarks:
         This is the origin of the normalization frame — far more stable
         than the wrist alone, since averaging across 5 points cancels
         per-landmark detector noise.
+
+        Computed from `keypoints`, which may be post-normalisation (in
+        which case this is ≈ (0, 0) by construction). For pre-
+        normalisation image-space centroid, see `image_palm_centroid`.
         """
         return self.keypoints[list(PALM_ANCHORS)].mean(axis=0)
 

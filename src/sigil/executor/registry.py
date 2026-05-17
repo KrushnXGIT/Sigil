@@ -2,21 +2,12 @@
 
 The registry is a whitelist. An ``ActionDispatch`` whose ``action``
 string is not in the registry is logged and dropped, never invoked.
-This means a typo in an action name fails loudly rather than silently
-calling the wrong thing.
 
-For Patch 2 the registry is hardcoded as ``DEFAULT_REGISTRY``,
-covering the four Tier 1 actions reachable from the interpreter:
+Patch 5 expands the Tier 1 set with four Tier 2 verbs reachable from
+swipe gestures:
 
-  - ``media.play_pause`` (from fist)
-  - ``media.mute`` (from peace)
-  - ``window.maximize`` (from ok)
-  - ``system.undo`` (from thumbs_down, reserved)
-
-When the executor needs to grow new verbs (Tier 2 swipes for media
-next/previous, etc.), they're added here. The registry interface is
-intentionally simple — a dict of names → Verbs — so user-defined
-custom verbs in a later phase can drop in without ceremony.
+  - ``media.next`` / ``media.previous`` — track navigation
+  - ``volume.up`` / ``volume.down`` — system volume control
 """
 
 from __future__ import annotations
@@ -26,26 +17,19 @@ from dataclasses import dataclass
 
 from sigil.executor.verbs import (
     media_mute,
+    media_next,
     media_play_pause,
+    media_previous,
     system_undo,
+    volume_down,
+    volume_up,
     window_maximize,
 )
 
 
 @dataclass(frozen=True, slots=True)
 class Verb:
-    """A named, callable OS action.
-
-    Attributes:
-        name: dotted action string (e.g. "media.play_pause"). Must
-            match the ``ActionDispatch.action`` string emitted by the
-            interpreter for this verb to be reachable.
-        action: zero-argument callable returning ``bool`` (True =
-            attempted successfully, False = couldn't even attempt).
-            Exceptions propagate; the dispatcher catches them.
-        description: human-readable description, surfaced in
-            ``sigil daemon list-verbs`` and in logs.
-    """
+    """A named, callable OS action."""
 
     name: str
     action: Callable[[], bool]
@@ -53,6 +37,7 @@ class Verb:
 
 
 DEFAULT_REGISTRY: dict[str, Verb] = {
+    # Tier 1 (unchanged from Patch 2).
     "media.play_pause": Verb(
         name="media.play_pause",
         action=media_play_pause,
@@ -73,17 +58,34 @@ DEFAULT_REGISTRY: dict[str, Verb] = {
         action=system_undo,
         description="Send Ctrl+Z to the focused application.",
     ),
+    # Tier 2 (new in Patch 5).
+    "media.next": Verb(
+        name="media.next",
+        action=media_next,
+        description="Skip to the next track (sends VK_MEDIA_NEXT_TRACK).",
+    ),
+    "media.previous": Verb(
+        name="media.previous",
+        action=media_previous,
+        description="Skip to the previous track (sends VK_MEDIA_PREV_TRACK).",
+    ),
+    "volume.up": Verb(
+        name="volume.up",
+        action=volume_up,
+        description="Increase system volume by one step.",
+    ),
+    "volume.down": Verb(
+        name="volume.down",
+        action=volume_down,
+        description="Decrease system volume by one step.",
+    ),
 }
 
 
 def make_registry(
     overrides: dict[str, Verb] | None = None,
 ) -> dict[str, Verb]:
-    """Return a fresh registry with optional overrides applied.
-
-    Useful in tests (substitute mock verbs) and for future
-    user-customisation flows.
-    """
+    """Return a fresh registry with optional overrides applied."""
     reg = dict(DEFAULT_REGISTRY)
     if overrides:
         reg.update(overrides)

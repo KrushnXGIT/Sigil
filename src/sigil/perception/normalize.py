@@ -41,6 +41,34 @@ _MIN_PALM_SCALE = 1e-4
 # Faster than building a list on every call.
 _PALM_INDEX = np.array(PALM_ANCHORS, dtype=np.intp)
 
+# def normalize_landmarks_with_centroid(
+#     landmarks: NDArray[np.float32],
+# ) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
+#     """Like normalize_landmarks, but also returns the raw image-space centroid.
+
+#     Returns:
+#         (normalized_keypoints, centroid_image) where centroid_image is the
+#         palm centroid in [0, 1] image coordinates *before* normalization.
+#         Pass it to HandLandmarks(centroid_image=...) so swipe detection
+#         can track absolute position.
+#     """
+#     if landmarks.shape != (N_LANDMARKS, N_COORDS):
+#         raise NormalizationError(
+#             f"Expected shape ({N_LANDMARKS}, {N_COORDS}), got {landmarks.shape}"
+#         )
+#     if landmarks.dtype != np.float32:
+#         raise NormalizationError(f"Expected float32, got {landmarks.dtype}")
+
+#     anchors = landmarks[_PALM_INDEX]
+#     centroid = anchors.mean(axis=0).astype(np.float32)   # ← preserve this
+#     centered = landmarks - centroid
+#     palm_scale = float(np.linalg.norm(centered[_PALM_INDEX], axis=1).mean())
+
+#     if palm_scale < _MIN_PALM_SCALE:
+#         return centered.astype(np.float32, copy=False), centroid
+
+#     return (centered / palm_scale).astype(np.float32, copy=False), centroid
+
 
 class NormalizationError(ValueError):
     """Raised when an input is structurally invalid (wrong shape/dtype)."""
@@ -81,6 +109,38 @@ def normalize_landmarks(landmarks: NDArray[np.float32]) -> NDArray[np.float32]:
     return (centered / palm_scale).astype(np.float32, copy=False)
 
 
+# Add after normalize_landmarks():
+
+
+def normalize_landmarks_with_centroid(
+    landmarks: NDArray[np.float32],
+) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
+    """Like normalize_landmarks, but also returns the raw image-space centroid.
+
+    Returns:
+        (normalized_keypoints, centroid_image) where centroid_image is the
+        palm centroid in [0, 1] image coords *before* normalization.
+        Pass to HandLandmarks(centroid_image=...) so SwipeDetector can
+        track absolute hand position.
+    """
+    if landmarks.shape != (N_LANDMARKS, N_COORDS):
+        raise NormalizationError(
+            f"Expected shape ({N_LANDMARKS}, {N_COORDS}), got {landmarks.shape}"
+        )
+    if landmarks.dtype != np.float32:
+        raise NormalizationError(f"Expected float32, got {landmarks.dtype}")
+
+    anchors = landmarks[_PALM_INDEX]
+    centroid = anchors.mean(axis=0).astype(np.float32)  # ← the value we preserve
+    centered = landmarks - centroid
+    palm_scale = float(np.linalg.norm(centered[_PALM_INDEX], axis=1).mean())
+
+    if palm_scale < _MIN_PALM_SCALE:
+        return centered.astype(np.float32, copy=False), centroid
+
+    return (centered / palm_scale).astype(np.float32, copy=False), centroid
+
+
 def is_degenerate(landmarks: NDArray[np.float32]) -> bool:
     """True if the palm-scale is too small to normalize reliably.
 
@@ -95,4 +155,9 @@ def is_degenerate(landmarks: NDArray[np.float32]) -> bool:
     return palm_scale < _MIN_PALM_SCALE
 
 
-__all__ = ["NormalizationError", "is_degenerate", "normalize_landmarks"]
+__all__ = [
+    "NormalizationError",
+    "is_degenerate",
+    "normalize_landmarks",
+    "normalize_landmarks_with_centroid",
+]

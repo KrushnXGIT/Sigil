@@ -88,6 +88,7 @@ class SigilDaemon:
         confidence_threshold: float | None = None,
         detection_threshold: float | None = None,
         on_event: Callable | None = None,
+        enable_swipes: bool = True,
     ) -> None:
         if confidence_threshold is None and detection_threshold is None:
             self.classifier = ClassifierRuntime(model_path)
@@ -99,6 +100,16 @@ class SigilDaemon:
                 kwargs["detection_threshold"] = detection_threshold
             self.classifier = ClassifierRuntime(model_path, **kwargs)
 
+        # Tier 2: swipe detector runs alongside the static classifier.
+        # When a swipe is detected, it takes priority — the static
+        # classifier's output during fast hand motion is meaningless
+        # anyway (it was trained on stationary poses).
+        self.swipe_detector = None
+        if enable_swipes:
+            from sigil.intelligence.swipe_detector import SwipeDetector
+
+            self.swipe_detector = SwipeDetector()
+
         self.interpreter = Interpreter()
         self.dispatcher = Dispatcher()
         self.auto_activate = auto_activate_on_gesture
@@ -106,7 +117,6 @@ class SigilDaemon:
 
         self.stats = DaemonStats()
         self._should_stop = False
-        # Cached pieces of state used to assemble OverlayEvent objects.
         self._last_gesture: str | None = None
         self._last_gesture_confidence: float = 0.0
         self._last_action: str | None = None
@@ -156,7 +166,17 @@ class SigilDaemon:
         """Process a single LandmarkFrame end-to-end."""
         self.stats.frames_processed += 1
         try:
-            events = self.classifier.classify(frame)
+            # Tier 2 first: if a swipe is in progress, the static
+            # classifier's output is unreliable. Swipes take priority.
+            swipe_events: tuple = ()
+            if self.swipe_detector is not None:
+                swipe_events = self.swipe_detector.process(frame)
+
+            if swipe_events:
+                events = swipe_events
+            else:
+                events = self.classifier.classify(frame)
+
             self.stats.events_classified += len(events)
 
             # Cache the highest-confidence gesture for the overlay,
@@ -185,7 +205,7 @@ class SigilDaemon:
                 self._last_action = action.action
                 self._last_action_succeeded = ok
                 self._last_action_at_ns = frame.timestamp_ns
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             log.exception(
                 "frame_processing_failed",
                 frame_index=getattr(frame, "frame_index", -1),
@@ -222,7 +242,7 @@ class SigilDaemon:
                     fps=fps,
                 )
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             log.warning("on_event_callback_failed", error=str(exc))
 
 

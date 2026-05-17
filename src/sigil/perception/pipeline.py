@@ -29,7 +29,13 @@ from sigil.perception.capture import CameraCapture, CapturedFrame
 from sigil.perception.landmarks import HandLandmarkerWrapper
 from sigil.perception.normalize import is_degenerate, normalize_landmarks
 from sigil.perception.smoothing import OneEuroFilter
-from sigil.perception.types import N_COORDS, N_LANDMARKS, HandLandmarks, LandmarkFrame
+from sigil.perception.types import (
+    N_COORDS,
+    N_LANDMARKS,
+    PALM_ANCHORS,
+    HandLandmarks,
+    LandmarkFrame,
+)
 
 log = get_logger(__name__)
 
@@ -106,7 +112,7 @@ class PerceptionPipeline(AbstractContextManager["PerceptionPipeline"]):
             if resource is not None:
                 try:
                     resource.close()
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001
                     log.warning("pipeline_close_error", error=str(exc))
         self._landmarker = None
         self._camera = None
@@ -174,6 +180,15 @@ class PerceptionPipeline(AbstractContextManager["PerceptionPipeline"]):
                 continue
 
             smoothed = self._smooth(hand.handedness, t_seconds, hand.keypoints)
+
+            # Preserve the raw image-space palm centroid BEFORE
+            # normalisation. Downstream consumers that need to know
+            # where the hand is in the frame (notably the swipe
+            # detector tracking trajectory motion) read this; the
+            # static classifier path is unaffected because it only
+            # consumes the normalised keypoints.
+            image_palm_centroid = smoothed[list(PALM_ANCHORS)].mean(axis=0).astype(np.float32)
+
             keypoints = (
                 normalize_landmarks(smoothed) if self._opts.normalize_after_smoothing else smoothed
             )
@@ -183,6 +198,7 @@ class PerceptionPipeline(AbstractContextManager["PerceptionPipeline"]):
                     handedness=hand.handedness,
                     detection_confidence=hand.detection_confidence,
                     handedness_confidence=hand.handedness_confidence,
+                    image_palm_centroid=image_palm_centroid,
                 )
             )
 

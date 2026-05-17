@@ -81,9 +81,18 @@ class ActionMapping:
 # fine, the path will activate when the executor adds destructive verbs
 # in Patch 2 (window.close, system.lock, etc.).
 DEFAULT_TIER1_MAPPING: dict[str, ActionMapping] = {
+    # Tier 1 static gestures.
     "fist": ActionMapping(action="media.play_pause"),
     "peace": ActionMapping(action="media.mute"),
     "ok": ActionMapping(action="window.maximize"),
+    # Tier 2 dynamic gestures (added in Patch 5). These come from the
+    # SwipeDetector rather than the static classifier, but the
+    # interpreter doesn't care where a GestureEvent originated — only
+    # what the gesture name is.
+    "swipe_right": ActionMapping(action="media.next"),
+    "swipe_left": ActionMapping(action="media.previous"),
+    "swipe_up": ActionMapping(action="volume.up"),
+    "swipe_down": ActionMapping(action="volume.down"),
 }
 
 
@@ -321,11 +330,9 @@ class Interpreter:
         timestamp_ns: int,
     ) -> tuple[ActionDispatch, ...]:
         """Dispatch subject to the per-gesture cooldown."""
-        last = self._cooldowns.get(gesture)
-
-        if last is not None:
-            if timestamp_ns - last < DISPATCH_COOLDOWN_NS:
-                return ()
+        last = self._cooldowns.get(gesture, 0)
+        if timestamp_ns - last < DISPATCH_COOLDOWN_NS:
+            return ()
 
         self._cooldowns[gesture] = timestamp_ns
         self._transition(InterpreterState.EXECUTING, timestamp_ns)

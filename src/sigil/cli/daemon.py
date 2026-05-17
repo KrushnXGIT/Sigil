@@ -183,11 +183,26 @@ def _run_with_overlay(sigil, overlay_queue) -> None:
 
 
 def _daemon_thread_main(sigil) -> None:
-    """Run the daemon, swallowing exceptions so they don't kill the process."""
+    """Run the daemon. If it crashes, print the FULL traceback so a
+    silent ImportError doesn't get masked by the overlay window
+    sitting there doing nothing."""
+    import traceback
+
     try:
         sigil.run()
-    except Exception as exc:
-        console.print(f"[red]Daemon thread error:[/red] {exc}")
+    except Exception as exc:  # noqa: BLE001
+        console.print()
+        console.print(
+            "[bold red]Daemon thread crashed — the overlay window is now "
+            "running against a dead daemon.[/bold red]",
+        )
+        console.print(f"[red]{type(exc).__name__}: {exc}[/red]")
+        console.print("[red]" + "─" * 60 + "[/red]")
+        console.print(traceback.format_exc())
+        console.print("[red]" + "─" * 60 + "[/red]")
+        # Mark the daemon as stopped so the overlay's stop()/join
+        # logic also wraps up cleanly.
+        sigil._should_stop = True
 
 
 # --- presentation helpers (unchanged from Patch 2) --------------------

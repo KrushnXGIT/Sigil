@@ -1,26 +1,17 @@
-"""Windows-specific verb implementations for Tier 1 actions.
+"""Windows-specific verb implementations.
 
-Each verb is a no-argument callable that returns ``bool`` indicating
-whether the OS action was attempted successfully. ``True`` is "we
-asked the OS to do the thing." ``False`` is "we couldn't even ask"
-(missing dependency, no foreground window, etc.). Exceptions propagate
-to the dispatcher, which catches them per-verb so one broken verb
-doesn't tear down the whole daemon.
+Each verb is a no-argument callable returning ``bool``. ``True`` means
+"we asked the OS to do the thing." ``False`` means "we couldn't even
+ask" (missing dependency, no foreground window, etc.). Exceptions
+propagate to the dispatcher, which catches them per-verb so one
+broken verb doesn't tear down the whole daemon.
 
-Imports are lazy — done inside each function rather than at module
-load — so that:
+Imports are lazy so the module loads on machines without ``pywin32``
+or ``pynput`` installed (the registry can still introspect verb names
+even if they wouldn't run).
 
-  1. The registry can list and document verbs even on a machine
-     without ``pywin32`` or ``pynput`` installed.
-  2. Test code that uses a mock registry doesn't drag in the real
-     keyboard / win32 dependencies.
-
-The actual OS work happens through two libraries:
-
-  - **pynput** for keyboard-level events (media keys, Ctrl+Z). Cross
-    platform but on Windows ultimately uses ``SendInput`` underneath.
-  - **pywin32** for window-management work (maximize) where we need
-    HWND access.
+Patch 5 adds the Tier 2 media verbs reachable from swipe gestures:
+``media.next``, ``media.previous``, ``volume.up``, ``volume.down``.
 """
 
 from __future__ import annotations
@@ -30,8 +21,11 @@ from sigil.logging import get_logger
 log = get_logger(__name__)
 
 
+# --- Tier 1 verbs (unchanged from Patch 2) ----------------------------
+
+
 def media_play_pause() -> bool:
-    """Send VK_MEDIA_PLAY_PAUSE. Works system-wide regardless of focus."""
+    """Send VK_MEDIA_PLAY_PAUSE. System-wide, focus-independent."""
     try:
         from pynput.keyboard import Controller, Key
     except ImportError:
@@ -57,7 +51,7 @@ def media_mute() -> bool:
 
 
 def window_maximize() -> bool:
-    """Maximize the current foreground window. Returns False if there isn't one."""
+    """Maximize the current foreground window. False if there isn't one."""
     try:
         import win32con
         import win32gui
@@ -80,17 +74,74 @@ def system_undo() -> bool:
         log.error("verb_missing_dep", verb="system.undo", dep="pynput")
         return False
     kb = Controller()
-    # `with pressed(...)` guarantees the modifier is always released
-    # even if the inner press/release raises.
     with kb.pressed(Key.ctrl):
         kb.press("z")
         kb.release("z")
     return True
 
 
+# --- Tier 2 verbs (new in Patch 5) ------------------------------------
+
+
+def media_next() -> bool:
+    """Send VK_MEDIA_NEXT_TRACK. Skips forward in the system media stack."""
+    try:
+        from pynput.keyboard import Controller, Key
+    except ImportError:
+        log.error("verb_missing_dep", verb="media.next", dep="pynput")
+        return False
+    kb = Controller()
+    kb.press(Key.media_next)
+    kb.release(Key.media_next)
+    return True
+
+
+def media_previous() -> bool:
+    """Send VK_MEDIA_PREV_TRACK. Skips back in the system media stack."""
+    try:
+        from pynput.keyboard import Controller, Key
+    except ImportError:
+        log.error("verb_missing_dep", verb="media.previous", dep="pynput")
+        return False
+    kb = Controller()
+    kb.press(Key.media_previous)
+    kb.release(Key.media_previous)
+    return True
+
+
+def volume_up() -> bool:
+    """Send VK_VOLUME_UP. One step per call."""
+    try:
+        from pynput.keyboard import Controller, Key
+    except ImportError:
+        log.error("verb_missing_dep", verb="volume.up", dep="pynput")
+        return False
+    kb = Controller()
+    kb.press(Key.media_volume_up)
+    kb.release(Key.media_volume_up)
+    return True
+
+
+def volume_down() -> bool:
+    """Send VK_VOLUME_DOWN. One step per call."""
+    try:
+        from pynput.keyboard import Controller, Key
+    except ImportError:
+        log.error("verb_missing_dep", verb="volume.down", dep="pynput")
+        return False
+    kb = Controller()
+    kb.press(Key.media_volume_down)
+    kb.release(Key.media_volume_down)
+    return True
+
+
 __all__ = [
     "media_mute",
+    "media_next",
     "media_play_pause",
+    "media_previous",
     "system_undo",
+    "volume_down",
+    "volume_up",
     "window_maximize",
 ]

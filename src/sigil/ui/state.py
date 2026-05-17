@@ -170,10 +170,16 @@ def _derive_mood(
 # Maps action names to short caption strings shown under the face.
 # Falls back to the raw action name for anything not in the map.
 _ACTION_CAPTIONS = {
+    # Tier 1
     "media.play_pause": "▶  Play / Pause",
     "media.mute": "🔇  Mute",
     "window.maximize": "⬜  Maximize",
     "system.undo": "↶  Undo",
+    # Tier 2 (added Patch 5)
+    "media.next": "⏭  Next Track",
+    "media.previous": "⏮  Previous Track",
+    "volume.up": "🔊  Volume Up",
+    "volume.down": "🔉  Volume Down",
 }
 
 

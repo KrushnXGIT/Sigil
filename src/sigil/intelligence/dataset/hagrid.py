@@ -12,6 +12,10 @@ This module provides:
 URLs are taken from the HaGRIDv2 project README. HaGRID periodically rotates
 hosting; if a download 404s, check https://github.com/hukenovs/hagrid and
 update the constants below — the rest of the pipeline is URL-agnostic.
+
+V0 (ADR-0011) adds 6 new Sigil gestures to GESTURE_NAME_MAP:
+    call, rock, stop, three, four, one — all of which happen to share
+    their Sigil name with HaGRID's class label.
 """
 
 from __future__ import annotations
@@ -44,12 +48,25 @@ IMAGES_512_URL = (
 # Maps the *Sigil* gesture name (matching our StaticGesture enum) to the
 # HaGRIDv2 class name. `no_gesture` is the negative class — essential.
 GESTURE_NAME_MAP: dict[str, str] = {
+    # Reserved system gestures.
     "open_palm": "palm",  # HaGRID calls open-palm "palm".
     "thumbs_up": "like",  # HaGRID calls thumbs-up "like".
     "thumbs_down": "dislike",  # HaGRID calls thumbs-down "dislike".
+    # Original Tier 1 vocabulary.
     "fist": "fist",
     "peace": "peace",
     "ok": "ok",
+    # V0 vocabulary additions (ADR-0011). All map straight through —
+    # HaGRID's label happens to be the same as our Sigil name for
+    # these six. Kept explicit for clarity and to avoid surprising
+    # callers who think the map is identity-by-default.
+    "call": "call",
+    "rock": "rock",
+    "stop": "stop",
+    "three": "three",
+    "four": "four",
+    "one": "one",
+    # Negative class — must be present in every training run.
     "no_gesture": "no_gesture",
 }
 

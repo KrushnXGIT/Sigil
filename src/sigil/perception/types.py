@@ -16,7 +16,6 @@ Design notes:
     - Landmarks are 2D (x, y). MediaPipe also emits a z (depth) estimate;
       we discard it at the capture boundary. See ADR-0003 for why.
 """
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -77,57 +76,28 @@ PALM_ANCHORS: tuple[int, ...] = (WRIST, INDEX_MCP, MIDDLE_MCP, RING_MCP, PINKY_M
 # Names indexed by landmark ID — useful for debugging / overlay rendering.
 LANDMARK_NAMES: tuple[str, ...] = (
     "wrist",
-    "thumb_cmc",
-    "thumb_mcp",
-    "thumb_ip",
-    "thumb_tip",
-    "index_mcp",
-    "index_pip",
-    "index_dip",
-    "index_tip",
-    "middle_mcp",
-    "middle_pip",
-    "middle_dip",
-    "middle_tip",
-    "ring_mcp",
-    "ring_pip",
-    "ring_dip",
-    "ring_tip",
-    "pinky_mcp",
-    "pinky_pip",
-    "pinky_dip",
-    "pinky_tip",
+    "thumb_cmc", "thumb_mcp", "thumb_ip", "thumb_tip",
+    "index_mcp", "index_pip", "index_dip", "index_tip",
+    "middle_mcp", "middle_pip", "middle_dip", "middle_tip",
+    "ring_mcp", "ring_pip", "ring_dip", "ring_tip",
+    "pinky_mcp", "pinky_pip", "pinky_dip", "pinky_tip",
 )
 
 # Connection pairs for skeleton rendering (which landmarks to draw lines between).
 HAND_CONNECTIONS: tuple[tuple[int, int], ...] = (
     # Palm
-    (WRIST, THUMB_CMC),
-    (WRIST, INDEX_MCP),
-    (WRIST, PINKY_MCP),
-    (INDEX_MCP, MIDDLE_MCP),
-    (MIDDLE_MCP, RING_MCP),
-    (RING_MCP, PINKY_MCP),
+    (WRIST, THUMB_CMC), (WRIST, INDEX_MCP), (WRIST, PINKY_MCP),
+    (INDEX_MCP, MIDDLE_MCP), (MIDDLE_MCP, RING_MCP), (RING_MCP, PINKY_MCP),
     # Thumb
-    (THUMB_CMC, THUMB_MCP),
-    (THUMB_MCP, THUMB_IP),
-    (THUMB_IP, THUMB_TIP),
+    (THUMB_CMC, THUMB_MCP), (THUMB_MCP, THUMB_IP), (THUMB_IP, THUMB_TIP),
     # Index
-    (INDEX_MCP, INDEX_PIP),
-    (INDEX_PIP, INDEX_DIP),
-    (INDEX_DIP, INDEX_TIP),
+    (INDEX_MCP, INDEX_PIP), (INDEX_PIP, INDEX_DIP), (INDEX_DIP, INDEX_TIP),
     # Middle
-    (MIDDLE_MCP, MIDDLE_PIP),
-    (MIDDLE_PIP, MIDDLE_DIP),
-    (MIDDLE_DIP, MIDDLE_TIP),
+    (MIDDLE_MCP, MIDDLE_PIP), (MIDDLE_PIP, MIDDLE_DIP), (MIDDLE_DIP, MIDDLE_TIP),
     # Ring
-    (RING_MCP, RING_PIP),
-    (RING_PIP, RING_DIP),
-    (RING_DIP, RING_TIP),
+    (RING_MCP, RING_PIP), (RING_PIP, RING_DIP), (RING_DIP, RING_TIP),
     # Pinky
-    (PINKY_MCP, PINKY_PIP),
-    (PINKY_PIP, PINKY_DIP),
-    (PINKY_DIP, PINKY_TIP),
+    (PINKY_MCP, PINKY_PIP), (PINKY_PIP, PINKY_DIP), (PINKY_DIP, PINKY_TIP),
 )
 
 
@@ -156,6 +126,12 @@ class HandLandmarks:
             before palm-centroid normalisation is applied to keypoints.
             None for HandLandmarks constructed outside the pipeline
             (e.g. in tests, or when normalisation is disabled).
+        image_keypoints: full 21-landmark array in raw image-normalised
+            coordinates [0, 1], pre-normalisation. Mirrors `keypoints`
+            but preserves image-space positions for Tier 3 modules
+            (notably the pointer detector, which reads the index
+            fingertip position to drive the cursor). None when
+            constructed outside the pipeline.
     """
 
     keypoints: NDArray[np.float32]
@@ -163,6 +139,7 @@ class HandLandmarks:
     detection_confidence: float
     handedness_confidence: float = 1.0
     image_palm_centroid: NDArray[np.float32] | None = None
+    image_keypoints: NDArray[np.float32] | None = None
 
     def __post_init__(self) -> None:
         # Validate shape and dtype upfront — bad data here causes confusing
@@ -173,14 +150,24 @@ class HandLandmarks:
                 f"got {self.keypoints.shape}"
             )
         if self.keypoints.dtype != np.float32:
-            raise ValueError(f"keypoints must be float32, got {self.keypoints.dtype}")
+            raise ValueError(
+                f"keypoints must be float32, got {self.keypoints.dtype}"
+            )
         if not 0.0 <= self.detection_confidence <= 1.0:
-            raise ValueError(f"detection_confidence out of range: {self.detection_confidence}")
+            raise ValueError(
+                f"detection_confidence out of range: {self.detection_confidence}"
+            )
         if self.image_palm_centroid is not None:
             if self.image_palm_centroid.shape != (N_COORDS,):
                 raise ValueError(
                     f"image_palm_centroid must have shape ({N_COORDS},), "
                     f"got {self.image_palm_centroid.shape}"
+                )
+        if self.image_keypoints is not None:
+            if self.image_keypoints.shape != (N_LANDMARKS, N_COORDS):
+                raise ValueError(
+                    f"image_keypoints must have shape ({N_LANDMARKS}, {N_COORDS}), "
+                    f"got {self.image_keypoints.shape}"
                 )
 
     @property
@@ -255,31 +242,16 @@ class LandmarkFrame:
 
 __all__ = [
     "HAND_CONNECTIONS",
-    "INDEX_DIP",
-    "INDEX_MCP",
-    "INDEX_PIP",
-    "INDEX_TIP",
+    "INDEX_DIP", "INDEX_MCP", "INDEX_PIP", "INDEX_TIP",
     "LANDMARK_NAMES",
-    "MIDDLE_DIP",
-    "MIDDLE_MCP",
-    "MIDDLE_PIP",
-    "MIDDLE_TIP",
+    "MIDDLE_DIP", "MIDDLE_MCP", "MIDDLE_PIP", "MIDDLE_TIP",
     "N_COORDS",
     "N_LANDMARKS",
     "PALM_ANCHORS",
-    "PINKY_DIP",
-    "PINKY_MCP",
-    "PINKY_PIP",
-    "PINKY_TIP",
+    "PINKY_DIP", "PINKY_MCP", "PINKY_PIP", "PINKY_TIP",
     "PROTOCOL_VERSION",
-    "RING_DIP",
-    "RING_MCP",
-    "RING_PIP",
-    "RING_TIP",
-    "THUMB_CMC",
-    "THUMB_IP",
-    "THUMB_MCP",
-    "THUMB_TIP",
+    "RING_DIP", "RING_MCP", "RING_PIP", "RING_TIP",
+    "THUMB_CMC", "THUMB_IP", "THUMB_MCP", "THUMB_TIP",
     "WRIST",
     "HandLandmarks",
     "Handedness",

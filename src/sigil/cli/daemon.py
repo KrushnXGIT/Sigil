@@ -1,14 +1,19 @@
 """``sigil daemon`` Click subcommands.
 
-Patch 3 adds:
-    --overlay flag for ``sigil daemon run`` that launches the Tkinter
-    overlay alongside the daemon. The daemon runs in a background
-    thread, the overlay on the main thread, and they communicate via a
-    bounded thread-safe queue.
+V0 adds:
+    --ed / --enable-dynamic flag for ``sigil daemon run`` that
+    enables Tier 2 (swipe) and Tier 3 (pointer) dynamic detectors.
+    Default OFF — V0 demos a clean static-gesture system; dynamic
+    detectors are opt-in for testing.
 
-The default (no flag) keeps Patch 2's behaviour exactly: console-only,
-single-threaded, identical UX to ``sigil daemon run`` that already
-worked in Patch 2.
+Patch 3 added:
+    --overlay flag launches the Tkinter overlay alongside the daemon.
+    The daemon runs in a background thread, the overlay on the main
+    thread, and they communicate via a bounded thread-safe queue.
+
+The default (no flags) keeps Patch 2's behaviour exactly: console-only,
+single-threaded, identical UX to ``sigil daemon run`` that worked in
+Patch 2.
 """
 
 from __future__ import annotations
@@ -62,12 +67,22 @@ def daemon() -> None:
     help="Show the Sigi mascot overlay window. Requires tkinter "
     "(bundled with standard Python on Windows).",
 )
+@click.option(
+    "-ed",
+    "--enable-dynamic",
+    "enable_dynamic",
+    is_flag=True,
+    default=False,
+    help="Enable Tier 2 swipe detection and Tier 3 pointer mode. "
+    "Default OFF — V0 ships static gestures only by default.",
+)
 def run(
     model_path: Path | None,
     no_auto_activate: bool,
     confidence_threshold: float | None,
     detection_threshold: float | None,
     overlay: bool,
+    enable_dynamic: bool,
 ) -> None:
     """Start the Sigil daemon. Ctrl+C to stop."""
     from sigil.daemon.runtime import SigilDaemon
@@ -113,12 +128,16 @@ def run(
             confidence_threshold=confidence_threshold,
             detection_threshold=detection_threshold,
             on_event=on_event,
+            enable_swipes=enable_dynamic,
+            enable_pointer=enable_dynamic,
         )
     except (FileNotFoundError, ValueError) as exc:
         console.print(f"[red]Failed to start daemon:[/red] {exc}")
         sys.exit(2)
 
-    _print_startup_banner(sigil, model_path, no_auto_activate, overlay)
+    _print_startup_banner(
+        sigil, model_path, no_auto_activate, overlay, enable_dynamic,
+    )
 
     if overlay:
         _run_with_overlay(sigil, overlay_queue)
@@ -133,10 +152,12 @@ def list_verbs() -> None:
 
     table = Table(title="Registered verbs")
     table.add_column("Action", style="cyan")
+    table.add_column("Destructive?", justify="center")
     table.add_column("Description")
     for name in sorted(DEFAULT_REGISTRY):
         verb = DEFAULT_REGISTRY[name]
-        table.add_row(name, verb.description)
+        destructive = "yes" if getattr(verb, "is_destructive", False) else ""
+        table.add_row(name, destructive, verb.description)
     console.print(table)
 
 
@@ -200,12 +221,10 @@ def _daemon_thread_main(sigil) -> None:
         console.print("[red]" + "─" * 60 + "[/red]")
         console.print(traceback.format_exc())
         console.print("[red]" + "─" * 60 + "[/red]")
-        # Mark the daemon as stopped so the overlay's stop()/join
-        # logic also wraps up cleanly.
         sigil._should_stop = True
 
 
-# --- presentation helpers (unchanged from Patch 2) --------------------
+# --- presentation helpers ---------------------------------------------
 
 
 def _find_default_model() -> Path:
@@ -226,7 +245,13 @@ def _find_default_model() -> Path:
     return candidates[0]
 
 
-def _print_startup_banner(sigil, model_path: Path, no_auto_activate: bool, overlay: bool) -> None:
+def _print_startup_banner(
+    sigil,
+    model_path: Path,
+    no_auto_activate: bool,
+    overlay: bool,
+    enable_dynamic: bool,
+) -> None:
     console.print()
     console.print("[bold green]Sigil daemon starting[/bold green]")
     console.print(f"  Model:           {model_path}")
@@ -245,6 +270,10 @@ def _print_startup_banner(sigil, model_path: Path, no_auto_activate: bool, overl
         f"{'NO (wake word required)' if no_auto_activate else 'YES (Patch 2 default)'}",
     )
     console.print(f"  Overlay:         {'YES (Sigi)' if overlay else 'no'}")
+    console.print(
+        f"  Dynamic (swipe + pointer): "
+        f"{'YES' if enable_dynamic else 'NO (--ed to enable)'}",
+    )
     console.print()
     if overlay:
         console.print(
@@ -273,6 +302,10 @@ def _print_session_summary(stats) -> None:
     if stats.dispatches_failed:
         console.print(
             f"Dispatches failed:    [red]{stats.dispatches_failed}[/red]",
+        )
+    if getattr(stats, "pointer_active_frames", 0):
+        console.print(
+            f"Pointer active frames: {stats.pointer_active_frames}",
         )
 
     if stats.per_action:

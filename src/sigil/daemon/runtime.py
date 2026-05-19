@@ -5,10 +5,12 @@ Topology::
     Camera frame
         → PerceptionPipeline       (capture + landmarks + smoothing + normalise)
         → LandmarkFrame
-        → ClassifierRuntime        (ONNX inference, multi-hand → events)
-        → tuple[GestureEvent, ...]
+        → PointerDetector          (Tier 3: index-tip cursor + pinch click)
+            └─ if ACTIVE, suppress static + swipe for this frame
+        → SwipeDetector            (Tier 2: dynamic swipe gestures)
+            └─ if swipe detected, takes priority over static
+        → ClassifierRuntime        (Tier 1: ONNX inference, static gestures)
         → Interpreter              (FSM, debounce, cooldown, confirm)
-        → tuple[ActionDispatch, ...]
         → Dispatcher               (verb registry, exception isolation)
         → OS actions
 
@@ -16,10 +18,25 @@ The loop is single-threaded and synchronous on purpose. The whole
 chain — capture, MediaPipe, normalise, ONNX, FSM, dispatch — fits
 inside one frame budget at 30 FPS on a 2-core CPU.
 
-Patch-3 addition: an optional ``on_event`` callback that fires once
-per frame with a snapshot of "what the overlay should be showing."
-Backward-compatible — pass nothing and the daemon behaves identically
-to Patch 2.
+Tier ordering rationale:
+  - Pointer runs first because when ACTIVE it owns the input modality
+    completely; running static or swipe alongside would fire
+    spurious events from the same hand motion.
+  - Swipe runs before static because the static classifier was
+    trained on stationary poses and is meaningless during fast hand
+    motion. If a swipe is detected, prefer it.
+  - Static runs only when neither of the above fired.
+
+Patch-3 addition (preserved): an optional ``on_event`` callback that
+fires once per frame with a snapshot of "what the overlay should be
+showing." Backward-compatible — pass nothing and the daemon emits
+nothing.
+
+Phase 4 Patch 1 addition: PointerDetector integration with
+defensive initialisation. If pointer construction fails (e.g.
+pynput unavailable or screen-size detection broken), the failure
+is logged loudly and the daemon continues without pointer support,
+preserving Tier 1 + Tier 2 functionality.
 """
 
 from __future__ import annotations
@@ -48,6 +65,7 @@ class DaemonStats:
     dispatches_succeeded: int = 0
     dispatches_failed: int = 0
     auto_activations: int = 0
+    pointer_active_frames: int = 0
     started_at_ns: int = 0
     stopped_at_ns: int = 0
     per_action: dict[str, dict[str, int | None]] = field(default_factory=dict)
@@ -78,6 +96,11 @@ class SigilDaemon:
         on_event: optional callable invoked once per frame with the
             current overlay snapshot. Used by the Tkinter overlay; pass
             ``None`` to skip (default).
+        enable_swipes: enable Tier 2 dynamic swipe detection. Default True.
+        enable_pointer: enable Tier 3 cursor/click mode. Default True. If
+            construction fails (pynput missing, screen-size broken),
+            the failure is logged and the daemon continues without
+            pointer support.
     """
 
     def __init__(
@@ -89,6 +112,7 @@ class SigilDaemon:
         detection_threshold: float | None = None,
         on_event: Callable | None = None,
         enable_swipes: bool = True,
+        enable_pointer: bool = True,
     ) -> None:
         if confidence_threshold is None and detection_threshold is None:
             self.classifier = ClassifierRuntime(model_path)
@@ -103,12 +127,29 @@ class SigilDaemon:
         # Tier 2: swipe detector runs alongside the static classifier.
         # When a swipe is detected, it takes priority — the static
         # classifier's output during fast hand motion is meaningless
-        # anyway (it was trained on stationary poses).
+        # (it was trained on stationary poses).
         self.swipe_detector = None
         if enable_swipes:
             from sigil.intelligence.swipe_detector import SwipeDetector
-
             self.swipe_detector = SwipeDetector()
+
+        # Tier 3: pointer detector with defensive initialisation.
+        # If pointer construction fails for any reason (pynput
+        # import, screen-size detection, OS-level call), we log the
+        # failure loudly and keep going. Tier 1 + Tier 2 still work.
+        self.pointer_detector = None
+        if enable_pointer:
+            try:
+                from sigil.intelligence.pointer_detector import PointerDetector
+                self.pointer_detector = PointerDetector()
+            except Exception as exc:   # noqa: BLE001
+                log.warning(
+                    "pointer_detector_init_failed",
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                    note="continuing without pointer support",
+                )
+                self.pointer_detector = None
 
         self.interpreter = Interpreter()
         self.dispatcher = Dispatcher()
@@ -158,6 +199,7 @@ class SigilDaemon:
                 frames=self.stats.frames_processed,
                 dispatches=self.stats.dispatches_succeeded,
                 failures=self.stats.dispatches_failed,
+                pointer_active_frames=self.stats.pointer_active_frames,
                 avg_fps=f"{self.stats.average_fps:.1f}",
             )
         return self.stats
@@ -166,12 +208,25 @@ class SigilDaemon:
         """Process a single LandmarkFrame end-to-end."""
         self.stats.frames_processed += 1
         try:
-            # Tier 2 first: if a swipe is in progress, the static
-            # classifier's output is unreliable. Swipes take priority.
+            # --- Tier 3: pointer mode. If ACTIVE, it owns the
+            #     input modality this frame — skip swipe and static.
+            if self.pointer_detector is not None:
+                if self.pointer_detector.process(frame):
+                    self.stats.pointer_active_frames += 1
+                    # Don't emit overlay-cursor-update events;
+                    # overlay still reflects the most recent
+                    # non-pointer state.
+                    return
+
+            # --- Tier 2: swipe detector runs before static classifier.
+            #     If a swipe is detected, it takes priority — the
+            #     static classifier's output during fast hand motion
+            #     is unreliable (trained on stationary poses).
             swipe_events: tuple = ()
             if self.swipe_detector is not None:
                 swipe_events = self.swipe_detector.process(frame)
 
+            # --- Tier 1: static classifier, only if no swipe.
             if swipe_events:
                 events = swipe_events
             else:
@@ -186,7 +241,11 @@ class SigilDaemon:
                 self._last_gesture = selected.gesture
                 self._last_gesture_confidence = selected.confidence
 
-            if self.auto_activate and events and self.interpreter.state == InterpreterState.DORMANT:
+            if (
+                self.auto_activate
+                and events
+                and self.interpreter.state == InterpreterState.DORMANT
+            ):
                 self.interpreter.activate(frame.timestamp_ns)
                 self.stats.auto_activations += 1
                 log.info("auto_reactivated", frame_index=frame.frame_index)

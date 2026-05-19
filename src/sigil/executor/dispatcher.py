@@ -60,7 +60,7 @@ class Dispatcher:
             return False
 
         try:
-            ok = verb.action()
+            ok = verb.callable()
         except Exception as exc:
             log.exception(
                 "verb_raised",

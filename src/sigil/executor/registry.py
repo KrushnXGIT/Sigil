@@ -1,13 +1,19 @@
-"""Action registry: action-string → verb callable.
+"""Executor verb registry.
 
-The registry is a whitelist. An ``ActionDispatch`` whose ``action``
-string is not in the registry is logged and dropped, never invoked.
+Maps verb names (``"media.play_pause"``) to their implementations
+plus metadata (description, destructive flag). The dispatcher reads
+this registry to resolve incoming ActionDispatch objects.
 
-Patch 5 expands the Tier 1 set with four Tier 2 verbs reachable from
-swipe gestures:
+The registry is open: callers can register new verbs at runtime via
+``register()``. The default registry below is populated at module load
+with all V0 verbs.
 
-  - ``media.next`` / ``media.previous`` — track navigation
-  - ``volume.up`` / ``volume.down`` — system volume control
+V0 (ADR-0011) adds:
+  - window.minimize
+  - window.close (destructive)
+  - system.redo
+  - system.launch_terminal
+  - system.screenshot
 """
 
 from __future__ import annotations
@@ -20,67 +26,113 @@ from sigil.executor.verbs import (
     media_next,
     media_play_pause,
     media_previous,
+    system_launch_terminal,
+    system_redo,
+    system_screenshot,
     system_undo,
     volume_down,
     volume_up,
+    window_close,
     window_maximize,
+    window_minimize,
 )
+from sigil.logging import get_logger
+
+log = get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
 class Verb:
-    """A named, callable OS action."""
+    """A registered action verb."""
 
     name: str
-    action: Callable[[], bool]
+    callable: Callable[[], bool]
     description: str
+    is_destructive: bool = False
 
 
+# V0 default registry (ADR-0011).
 DEFAULT_REGISTRY: dict[str, Verb] = {
-    # Tier 1 (unchanged from Patch 2).
+    # --- Media (Tier 1 + Tier 2) ---
     "media.play_pause": Verb(
         name="media.play_pause",
-        action=media_play_pause,
-        description="Toggle media playback (sends VK_MEDIA_PLAY_PAUSE).",
+        callable=media_play_pause,
+        description="Toggle media play/pause (system-wide).",
     ),
     "media.mute": Verb(
         name="media.mute",
-        action=media_mute,
-        description="Toggle system mute (sends VK_VOLUME_MUTE).",
+        callable=media_mute,
+        description="Toggle system mute.",
     ),
-    "window.maximize": Verb(
-        name="window.maximize",
-        action=window_maximize,
-        description="Maximize the current foreground window.",
-    ),
-    "system.undo": Verb(
-        name="system.undo",
-        action=system_undo,
-        description="Send Ctrl+Z to the focused application.",
-    ),
-    # Tier 2 (new in Patch 5).
     "media.next": Verb(
         name="media.next",
-        action=media_next,
-        description="Skip to the next track (sends VK_MEDIA_NEXT_TRACK).",
+        callable=media_next,
+        description="Skip to next track (system media keys).",
     ),
     "media.previous": Verb(
         name="media.previous",
-        action=media_previous,
-        description="Skip to the previous track (sends VK_MEDIA_PREV_TRACK).",
+        callable=media_previous,
+        description="Skip to previous track.",
     ),
     "volume.up": Verb(
         name="volume.up",
-        action=volume_up,
-        description="Increase system volume by one step.",
+        callable=volume_up,
+        description="Raise system volume by one step.",
     ),
     "volume.down": Verb(
         name="volume.down",
-        action=volume_down,
-        description="Decrease system volume by one step.",
+        callable=volume_down,
+        description="Lower system volume by one step.",
+    ),
+    # --- Window management ---
+    "window.maximize": Verb(
+        name="window.maximize",
+        callable=window_maximize,
+        description="Maximize the foreground window.",
+    ),
+    "window.minimize": Verb(
+        name="window.minimize",
+        callable=window_minimize,
+        description="Minimize the foreground window.",
+    ),
+    "window.close": Verb(
+        name="window.close",
+        callable=window_close,
+        description="Close the foreground window (Alt+F4). Destructive — "
+                    "requires thumbs_up confirmation within 5 s.",
+        is_destructive=True,
+    ),
+    # --- System ---
+    "system.undo": Verb(
+        name="system.undo",
+        callable=system_undo,
+        description="Send Ctrl+Z to the focused application.",
+    ),
+    "system.redo": Verb(
+        name="system.redo",
+        callable=system_redo,
+        description="Send Ctrl+Y to the focused application.",
+    ),
+    "system.screenshot": Verb(
+        name="system.screenshot",
+        callable=system_screenshot,
+        description="Open Snipping Tool (Win+Shift+S).",
+    ),
+    "system.launch_terminal": Verb(
+        name="system.launch_terminal",
+        callable=system_launch_terminal,
+        description="Focus a running terminal (Windows Terminal, VS Code, "
+                    "cmd, mintty) or launch Windows Terminal if none open.",
     ),
 }
 
+
+def register(verb: Verb, *, registry: dict[str, Verb] | None = None) -> None:
+    """Register a new verb, replacing any existing one with the same name."""
+    target = registry if registry is not None else DEFAULT_REGISTRY
+    if verb.name in target:
+        log.info("verb_registration_replaced", name=verb.name)
+    target[verb.name] = verb
 
 def make_registry(
     overrides: dict[str, Verb] | None = None,
@@ -92,8 +144,4 @@ def make_registry(
     return reg
 
 
-__all__ = [
-    "DEFAULT_REGISTRY",
-    "Verb",
-    "make_registry",
-]
+__all__ = ["DEFAULT_REGISTRY", "Verb", "register"]

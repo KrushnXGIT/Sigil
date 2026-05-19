@@ -16,8 +16,10 @@ Sits between the classifier runtime and the executor. Decides:
 
 See ADR-0005 for the state machine diagram and decision rules.
 
-Timing constants are hardcoded here for Patch 1; they'll move to the
-Pydantic config schema when Phase 3 polish lands.
+V0 (ADR-0011): vocabulary locked at 10 wired gestures + 2 reserved
+system gestures. CONFIRMING_TIMEOUT_NS bumped to 5 s. The
+``window.close`` action is marked destructive and uses the existing
+CONFIRMING FSM.
 """
 
 from __future__ import annotations
@@ -30,16 +32,17 @@ from sigil.logging import get_logger
 
 log = get_logger(__name__)
 
-# --- Hardcoded timing (Patch 1) ---
+# --- Hardcoded timing ---
 
 # LISTENING goes back to DORMANT after this many nanoseconds without
 # any non-trivial (non-"no_gesture") gesture activity.
 LISTENING_TIMEOUT_NS = 60 * 1_000_000_000  # 60 s
 
 # CONFIRMING silently returns to LISTENING after this long without a
-# thumbs_up. Calibrated for a user who's seen the on-screen prompt to
-# react comfortably.
-CONFIRMING_TIMEOUT_NS = 4 * 1_000_000_000  # 4 s
+# thumbs_up. V0: bumped from 4 s to 5 s after user feedback that 4 s
+# was tight when reading the on-screen prompt and committing to the
+# thumbs_up gesture. Applies to all destructive actions.
+CONFIRMING_TIMEOUT_NS = 5 * 1_000_000_000  # 5 s
 
 # A gesture must appear in this many consecutive frames before the
 # interpreter treats it as the active gesture. Filters single-frame
@@ -75,20 +78,25 @@ class ActionMapping:
     is_destructive: bool = False
 
 
-# Tier 1 default action mapping. The three non-reserved Tier 1 gestures
-# all map to non-destructive verbs. CONFIRMING will be exercised by
-# tests, but no live Tier 1 gesture triggers it under defaults — that's
-# fine, the path will activate when the executor adds destructive verbs
-# in Patch 2 (window.close, system.lock, etc.).
+# V0 default mapping (ADR-0011): 10 wired user-mappable gestures.
+# The 2 reserved gestures (open_palm, thumbs_up) are handled by the
+# FSM directly, not via this mapping. thumbs_down is reserved but
+# always fires system.undo (hardcoded in _handle_listening).
 DEFAULT_TIER1_MAPPING: dict[str, ActionMapping] = {
     # Tier 1 static gestures.
     "fist": ActionMapping(action="media.play_pause"),
     "peace": ActionMapping(action="media.mute"),
     "ok": ActionMapping(action="window.maximize"),
-    # Tier 2 dynamic gestures (added in Patch 5). These come from the
-    # SwipeDetector rather than the static classifier, but the
-    # interpreter doesn't care where a GestureEvent originated — only
-    # what the gesture name is.
+    # V0 additions:
+    "call": ActionMapping(action="system.launch_terminal"),
+    "rock": ActionMapping(action="media.next"),
+    "stop": ActionMapping(action="window.close", is_destructive=True),
+    "three": ActionMapping(action="system.screenshot"),
+    "four": ActionMapping(action="system.redo"),
+    "one": ActionMapping(action="window.minimize"),
+    # Tier 2 dynamic gestures (only used when --ed flag is passed to
+    # the daemon). The interpreter doesn't care where a GestureEvent
+    # originated — only what the gesture name is.
     "swipe_right": ActionMapping(action="media.next"),
     "swipe_left": ActionMapping(action="media.previous"),
     "swipe_up": ActionMapping(action="volume.up"),
@@ -279,6 +287,7 @@ class Interpreter:
                 "action_pending_confirmation",
                 action=mapping.action,
                 gesture=gesture,
+                timeout_s=CONFIRMING_TIMEOUT_NS / 1e9,
             )
             return ()
 
@@ -302,6 +311,11 @@ class Interpreter:
         if gesture == "thumbs_up":
             pending = self._pending
             self._pending = None
+            log.info(
+                "action_confirmed",
+                action=pending.mapping.action,
+                gesture=pending.triggered_by,
+            )
             dispatches = self._dispatch(
                 pending.mapping,
                 pending.triggered_by,

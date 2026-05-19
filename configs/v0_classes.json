@@ -1,0 +1,88 @@
+{
+  "version": "v0",
+  "description": "V0 vocabulary lockdown — 12 HaGRID classes selected for visual distinctness and command coverage. See ADR-0011.",
+  "classes": [
+    {
+      "hagrid_label": "fist",
+      "system_name": "fist",
+      "action": "media.play_pause",
+      "is_reserved": false
+    },
+    {
+      "hagrid_label": "peace",
+      "system_name": "peace",
+      "action": "media.mute",
+      "is_reserved": false
+    },
+    {
+      "hagrid_label": "ok",
+      "system_name": "ok",
+      "action": "window.maximize",
+      "is_reserved": false
+    },
+    {
+      "hagrid_label": "dislike",
+      "system_name": "thumbs_down",
+      "action": "system.undo",
+      "is_reserved": true
+    },
+    {
+      "hagrid_label": "call",
+      "system_name": "call",
+      "action": "system.launch_terminal",
+      "is_reserved": false
+    },
+    {
+      "hagrid_label": "rock",
+      "system_name": "rock",
+      "action": "media.next",
+      "is_reserved": false
+    },
+    {
+      "hagrid_label": "stop",
+      "system_name": "stop",
+      "action": "window.close",
+      "is_reserved": false,
+      "is_destructive": true
+    },
+    {
+      "hagrid_label": "three",
+      "system_name": "three",
+      "action": "system.screenshot",
+      "is_reserved": false
+    },
+    {
+      "hagrid_label": "four",
+      "system_name": "four",
+      "action": "system.redo",
+      "is_reserved": false
+    },
+    {
+      "hagrid_label": "one",
+      "system_name": "one",
+      "action": "window.minimize",
+      "is_reserved": false
+    },
+    {
+      "hagrid_label": "palm",
+      "system_name": "open_palm",
+      "action": null,
+      "is_reserved": true,
+      "reserved_role": "cancel"
+    },
+    {
+      "hagrid_label": "like",
+      "system_name": "thumbs_up",
+      "action": null,
+      "is_reserved": true,
+      "reserved_role": "confirm"
+    },
+    {
+      "hagrid_label": "no_gesture",
+      "system_name": "no_gesture",
+      "action": null,
+      "is_reserved": false
+    }
+  ],
+  "training_note": "Total 13 classes including no_gesture sentinel. Reserved classes (open_palm, thumbs_up) have no command mapping but the model must still learn them — they're used by the interpreter's CONFIRMING FSM."
+}

@@ -13,13 +13,14 @@ Usage:
         for frame in pipeline.stream():
             ... feed frame into intelligence ...
 """
+
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
-from typing import Iterator
 
 import numpy as np
 
@@ -73,7 +74,7 @@ class PerceptionPipeline(AbstractContextManager["PerceptionPipeline"]):
 
     # ----- lifecycle -----
 
-    def __enter__(self) -> "PerceptionPipeline":
+    def __enter__(self) -> PerceptionPipeline:
         self.open()
         return self
 
@@ -186,9 +187,7 @@ class PerceptionPipeline(AbstractContextManager["PerceptionPipeline"]):
             # detector tracking trajectory motion) read this; the
             # static classifier path is unaffected because it only
             # consumes the normalised keypoints.
-            image_palm_centroid = (
-                smoothed[list(PALM_ANCHORS)].mean(axis=0).astype(np.float32)
-            )
+            image_palm_centroid = smoothed[list(PALM_ANCHORS)].mean(axis=0).astype(np.float32)
 
             # Also preserve the full image-space keypoint array for
             # Tier 3 modules (notably the pointer detector, which
@@ -199,18 +198,18 @@ class PerceptionPipeline(AbstractContextManager["PerceptionPipeline"]):
             image_keypoints = smoothed.astype(np.float32, copy=True)
 
             keypoints = (
-                normalize_landmarks(smoothed)
-                if self._opts.normalize_after_smoothing
-                else smoothed
+                normalize_landmarks(smoothed) if self._opts.normalize_after_smoothing else smoothed
             )
-            processed.append(HandLandmarks(
-                keypoints=keypoints,
-                handedness=hand.handedness,
-                detection_confidence=hand.detection_confidence,
-                handedness_confidence=hand.handedness_confidence,
-                image_palm_centroid=image_palm_centroid,
-                image_keypoints=image_keypoints,
-            ))
+            processed.append(
+                HandLandmarks(
+                    keypoints=keypoints,
+                    handedness=hand.handedness,
+                    detection_confidence=hand.detection_confidence,
+                    handedness_confidence=hand.handedness_confidence,
+                    image_palm_centroid=image_palm_centroid,
+                    image_keypoints=image_keypoints,
+                )
+            )
 
         return LandmarkFrame(
             timestamp_ns=frame.timestamp_ns,

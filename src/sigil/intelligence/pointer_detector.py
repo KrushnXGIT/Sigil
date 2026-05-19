@@ -37,6 +37,7 @@ Design notes from research (see ADR-0010 for citations):
   - Cursor positions are smoothed by a One Euro Filter on (x, y) and
     snapped through a small dead zone to kill micro-jitter.
 """
+
 from __future__ import annotations
 
 import sys
@@ -115,6 +116,7 @@ class PointerState(str, Enum):
 class PointerOptions:
     """Tuning surface. All defaults are research-informed; see the
     constants above for the rationale."""
+
     pose_enter_frames: int = POSE_ENTER_FRAMES
     pose_exit_frames: int = POSE_EXIT_FRAMES
     active_margin_x: float = ACTIVE_MARGIN_X
@@ -148,21 +150,23 @@ def _get_screen_size() -> tuple[int, int]:
     try:
         if sys.platform == "win32":
             import ctypes
+
             user32 = ctypes.windll.user32
             user32.SetProcessDPIAware()
             return user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
-    except Exception:   # noqa: BLE001
+    except Exception:  # noqa: BLE001
         pass
     # Fallbacks (tk introspection or, as a last resort, a default).
     try:
         import tkinter
+
         root = tkinter.Tk()
         root.withdraw()
         try:
             return root.winfo_screenwidth(), root.winfo_screenheight()
         finally:
             root.destroy()
-    except Exception:   # noqa: BLE001
+    except Exception:  # noqa: BLE001
         pass
     log.warning("pointer_screen_size_fallback", default=(1920, 1080))
     return 1920, 1080
@@ -172,11 +176,13 @@ def _make_pynput_mouse() -> MouseBackend:
     """Default mouse backend. Imported lazily so headless test
     environments don't fail at module load."""
     from pynput.mouse import Controller
+
     return Controller()
 
 
 def _pynput_left_button() -> object:
     from pynput.mouse import Button
+
     return Button.left
 
 
@@ -196,17 +202,15 @@ class PointerDetector:
         self._screen_w, self._screen_h = (
             screen_size if screen_size is not None else _get_screen_size()
         )
-        self._left_button = (
-            left_button if left_button is not None else _pynput_left_button()
-        )
+        self._left_button = left_button if left_button is not None else _pynput_left_button()
 
         # FSM state.
         self._state = PointerState.NEUTRAL
-        self._pose_streak: int = 0       # +N when pose seen, reset otherwise
-        self._no_pose_streak: int = 0    # +N when pose lost while ACTIVE
+        self._pose_streak: int = 0  # +N when pose seen, reset otherwise
+        self._no_pose_streak: int = 0  # +N when pose lost while ACTIVE
 
         # Pinch / click bookkeeping.
-        self._pinch_active: bool = False    # latched while inside the pinch
+        self._pinch_active: bool = False  # latched while inside the pinch
         self._last_click_ns: int = 0
 
         # Cursor smoothing.
@@ -228,7 +232,7 @@ class PointerDetector:
 
     # ----- Public API --------------------------------------------
 
-    def process(self, frame: "LandmarkFrame") -> bool:
+    def process(self, frame: LandmarkFrame) -> bool:
         """Consume one frame; return True iff pointer is ACTIVE or
         the pointer-pose has been detected this frame.
 
@@ -261,9 +265,8 @@ class PointerDetector:
         #   - pointer is fully ACTIVE (cursor mode), OR
         #   - pointer is NEUTRAL but the pose is currently detected
         #     (activation in progress; don't let static cross-fire).
-        return (
-            self._state == PointerState.ACTIVE
-            or (self._state == PointerState.NEUTRAL and pose_ok)
+        return self._state == PointerState.ACTIVE or (
+            self._state == PointerState.NEUTRAL and pose_ok
         )
 
     @property
@@ -301,8 +304,8 @@ class PointerDetector:
 
     def _tick_active(
         self,
-        frame: "LandmarkFrame",
-        hand: "HandLandmarks",
+        frame: LandmarkFrame,
+        hand: HandLandmarks,
         pose_ok: bool,
     ) -> None:
         # Track pose loss for hysteresis.
@@ -366,18 +369,18 @@ class PointerDetector:
         """
         return bool(kp[tip_idx, 1] < kp[pip_idx, 1])
 
-    def _check_pose(self, hand: "HandLandmarks") -> bool:
+    def _check_pose(self, hand: HandLandmarks) -> bool:
         """Index up, middle/ring/pinky down. Thumb position is ignored
         because the pinch click intentionally moves the thumb.
         """
-        kp = hand.keypoints   # normalised, but y-ordering is preserved
+        kp = hand.keypoints  # normalised, but y-ordering is preserved
         index_up = self._finger_up(kp, INDEX_TIP, INDEX_PIP)
         middle_down = not self._finger_up(kp, MIDDLE_TIP, MIDDLE_PIP)
         ring_down = not self._finger_up(kp, RING_TIP, RING_PIP)
         pinky_down = not self._finger_up(kp, PINKY_TIP, PINKY_PIP)
         return index_up and middle_down and ring_down and pinky_down
 
-    def _check_pinch(self, hand: "HandLandmarks") -> bool:
+    def _check_pinch(self, hand: HandLandmarks) -> bool:
         """Pinch when thumb tip and index tip are close in palm-scale-
         normalised space. The normalised keypoints have already been
         divided by palm_scale, so this is naturally distance-invariant
@@ -393,8 +396,8 @@ class PointerDetector:
 
     def _compute_cursor(
         self,
-        frame: "LandmarkFrame",
-        hand: "HandLandmarks",
+        frame: LandmarkFrame,
+        hand: HandLandmarks,
     ) -> tuple[int, int] | None:
         """Map index-tip image position → screen pixel.
 
@@ -422,7 +425,8 @@ class PointerDetector:
         t_seconds = frame.timestamp_ns / 1e9
         if self._cursor_filter is not None:
             smoothed = self._cursor_filter(
-                t_seconds, np.array([nx, ny], dtype=np.float32),
+                t_seconds,
+                np.array([nx, ny], dtype=np.float32),
             )
             nx, ny = float(smoothed[0]), float(smoothed[1])
 
@@ -443,7 +447,7 @@ class PointerDetector:
         try:
             self._mouse.position = (sx, sy)
             self._last_cursor_xy = (sx, sy)
-        except Exception as exc:   # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             log.warning("pointer_move_failed", error=str(exc))
 
     def _fire_click(self, timestamp_ns: int) -> None:
@@ -456,7 +460,7 @@ class PointerDetector:
                 cursor=self._last_cursor_xy,
                 total_clicks=self._clicks_fired,
             )
-        except Exception as exc:   # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             log.warning("pointer_click_failed", error=str(exc))
 
 

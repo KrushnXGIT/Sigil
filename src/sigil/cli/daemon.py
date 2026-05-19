@@ -136,7 +136,11 @@ def run(
         sys.exit(2)
 
     _print_startup_banner(
-        sigil, model_path, no_auto_activate, overlay, enable_dynamic,
+        sigil,
+        model_path,
+        no_auto_activate,
+        overlay,
+        enable_dynamic,
     )
 
     if overlay:
@@ -271,8 +275,7 @@ def _print_startup_banner(
     )
     console.print(f"  Overlay:         {'YES (Sigi)' if overlay else 'no'}")
     console.print(
-        f"  Dynamic (swipe + pointer): "
-        f"{'YES' if enable_dynamic else 'NO (--ed to enable)'}",
+        f"  Dynamic (swipe + pointer): " f"{'YES' if enable_dynamic else 'NO (--ed to enable)'}",
     )
     console.print()
     if overlay:

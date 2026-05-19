@@ -99,7 +99,7 @@ DEFAULT_REGISTRY: dict[str, Verb] = {
         name="window.close",
         callable=window_close,
         description="Close the foreground window (Alt+F4). Destructive — "
-                    "requires thumbs_up confirmation within 5 s.",
+        "requires thumbs_up confirmation within 5 s.",
         is_destructive=True,
     ),
     # --- System ---
@@ -122,7 +122,7 @@ DEFAULT_REGISTRY: dict[str, Verb] = {
         name="system.launch_terminal",
         callable=system_launch_terminal,
         description="Focus a running terminal (Windows Terminal, VS Code, "
-                    "cmd, mintty) or launch Windows Terminal if none open.",
+        "cmd, mintty) or launch Windows Terminal if none open.",
     ),
 }
 
@@ -133,6 +133,7 @@ def register(verb: Verb, *, registry: dict[str, Verb] | None = None) -> None:
     if verb.name in target:
         log.info("verb_registration_replaced", name=verb.name)
     target[verb.name] = verb
+
 
 def make_registry(
     overrides: dict[str, Verb] | None = None,

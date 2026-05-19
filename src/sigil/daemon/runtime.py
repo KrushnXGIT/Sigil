@@ -131,6 +131,7 @@ class SigilDaemon:
         self.swipe_detector = None
         if enable_swipes:
             from sigil.intelligence.swipe_detector import SwipeDetector
+
             self.swipe_detector = SwipeDetector()
 
         # Tier 3: pointer detector with defensive initialisation.
@@ -141,8 +142,9 @@ class SigilDaemon:
         if enable_pointer:
             try:
                 from sigil.intelligence.pointer_detector import PointerDetector
+
                 self.pointer_detector = PointerDetector()
-            except Exception as exc:   # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 log.warning(
                     "pointer_detector_init_failed",
                     error=str(exc),
@@ -241,11 +243,7 @@ class SigilDaemon:
                 self._last_gesture = selected.gesture
                 self._last_gesture_confidence = selected.confidence
 
-            if (
-                self.auto_activate
-                and events
-                and self.interpreter.state == InterpreterState.DORMANT
-            ):
+            if self.auto_activate and events and self.interpreter.state == InterpreterState.DORMANT:
                 self.interpreter.activate(frame.timestamp_ns)
                 self.stats.auto_activations += 1
                 log.info("auto_reactivated", frame_index=frame.frame_index)

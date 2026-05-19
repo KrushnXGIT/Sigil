@@ -10,10 +10,10 @@ Synthetic LandmarkFrames with controlled finger positions exercise:
   - Dead zone (small jitter doesn't move the cursor)
   - Hand-lost handling while ACTIVE
 """
+
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from sigil.intelligence.pointer_detector import (
     PointerDetector,
@@ -36,8 +36,8 @@ from sigil.perception.types import (
     LandmarkFrame,
 )
 
-
 # --- Fakes ---------------------------------------------------------
+
 
 class FakeMouse:
     """Records moves and clicks instead of touching the OS."""
@@ -102,7 +102,7 @@ def _build_hand(
 
     # Thumb tip — used for pinch checks. Default: far from index tip.
     if thumb_tip_xy is None:
-        kp[THUMB_TIP] = (0.20, 0.70)   # away from index tip
+        kp[THUMB_TIP] = (0.20, 0.70)  # away from index tip
     else:
         kp[THUMB_TIP] = thumb_tip_xy
 
@@ -127,7 +127,7 @@ def _make_detector(
     *,
     pose_enter_frames: int = 3,
     pose_exit_frames: int = 3,
-    smoothing_beta: float = 1.0,   # nearly-pass-through smoothing for tests
+    smoothing_beta: float = 1.0,  # nearly-pass-through smoothing for tests
     smoothing_min_cutoff: float = 30.0,
     dead_zone_px: int = 0,
 ) -> tuple[PointerDetector, FakeMouse]:
@@ -148,10 +148,11 @@ def _make_detector(
     return det, mouse
 
 
-FRAME_NS = 67_000_000   # ~15 FPS
+FRAME_NS = 67_000_000  # ~15 FPS
 
 
 # --- Pose detection -----------------------------------------------
+
 
 class TestPoseDetection:
     def test_index_only_triggers_active(self) -> None:
@@ -167,10 +168,13 @@ class TestPoseDetection:
         ts = 0
         for i in range(6):
             ts += FRAME_NS
-            det.process(_frame(
-                _build_hand(index_up=True, middle_up=True),
-                ts_ns=ts, idx=i,
-            ))
+            det.process(
+                _frame(
+                    _build_hand(index_up=True, middle_up=True),
+                    ts_ns=ts,
+                    idx=i,
+                )
+            )
         assert det.state == PointerState.NEUTRAL
 
     def test_fist_does_not_trigger(self) -> None:
@@ -178,10 +182,13 @@ class TestPoseDetection:
         ts = 0
         for i in range(6):
             ts += FRAME_NS
-            det.process(_frame(
-                _build_hand(index_up=False),
-                ts_ns=ts, idx=i,
-            ))
+            det.process(
+                _frame(
+                    _build_hand(index_up=False),
+                    ts_ns=ts,
+                    idx=i,
+                )
+            )
         assert det.state == PointerState.NEUTRAL
 
     def test_open_palm_does_not_trigger(self) -> None:
@@ -189,17 +196,23 @@ class TestPoseDetection:
         ts = 0
         for i in range(6):
             ts += FRAME_NS
-            det.process(_frame(
-                _build_hand(
-                    index_up=True, middle_up=True,
-                    ring_up=True, pinky_up=True,
-                ),
-                ts_ns=ts, idx=i,
-            ))
+            det.process(
+                _frame(
+                    _build_hand(
+                        index_up=True,
+                        middle_up=True,
+                        ring_up=True,
+                        pinky_up=True,
+                    ),
+                    ts_ns=ts,
+                    idx=i,
+                )
+            )
         assert det.state == PointerState.NEUTRAL
 
 
 # --- Hysteresis ---------------------------------------------------
+
 
 class TestHysteresis:
     def test_short_pose_does_not_activate(self) -> None:
@@ -242,6 +255,7 @@ class TestHysteresis:
 
 # --- Cursor mapping -----------------------------------------------
 
+
 class TestCursorMapping:
     def _activate(
         self,
@@ -254,10 +268,13 @@ class TestCursorMapping:
         ts = 0
         for i in range(n):
             ts += FRAME_NS
-            det.process(_frame(
-                _build_hand(index_tip_xy=index_xy, thumb_tip_xy=thumb_xy),
-                ts_ns=ts, idx=i,
-            ))
+            det.process(
+                _frame(
+                    _build_hand(index_tip_xy=index_xy, thumb_tip_xy=thumb_xy),
+                    ts_ns=ts,
+                    idx=i,
+                )
+            )
         return ts
 
     def test_centre_of_frame_maps_to_centre_of_screen(self) -> None:
@@ -289,17 +306,22 @@ class TestCursorMapping:
         # Show a non-pointer hand (open palm) for 5 frames.
         for _ in range(5):
             ts += FRAME_NS
-            det.process(_frame(
-                _build_hand(
-                    index_up=True, middle_up=True,
-                    ring_up=True, pinky_up=True,
-                ),
-                ts_ns=ts,
-            ))
+            det.process(
+                _frame(
+                    _build_hand(
+                        index_up=True,
+                        middle_up=True,
+                        ring_up=True,
+                        pinky_up=True,
+                    ),
+                    ts_ns=ts,
+                )
+            )
         assert mouse.moves == []
 
 
 # --- Pinch click --------------------------------------------------
+
 
 class TestPinchClick:
     def test_pinch_fires_click(self) -> None:
@@ -308,19 +330,24 @@ class TestPinchClick:
         # Activate first (no pinch).
         for i in range(3):
             ts += FRAME_NS
-            det.process(_frame(
-                _build_hand(),  # thumb far from index by default
-                ts_ns=ts, idx=i,
-            ))
+            det.process(
+                _frame(
+                    _build_hand(),  # thumb far from index by default
+                    ts_ns=ts,
+                    idx=i,
+                )
+            )
         assert det.state == PointerState.ACTIVE
         clicks_before = len(mouse.clicks)
 
         # Now pinch — bring thumb tip on top of index tip.
         ts += FRAME_NS
-        det.process(_frame(
-            _build_hand(thumb_tip_xy=(0.5, 0.4)),   # ~same as index tip
-            ts_ns=ts,
-        ))
+        det.process(
+            _frame(
+                _build_hand(thumb_tip_xy=(0.5, 0.4)),  # ~same as index tip
+                ts_ns=ts,
+            )
+        )
         assert len(mouse.clicks) == clicks_before + 1
         assert mouse.clicks[-1] == (SENTINEL_LEFT, 1)
 
@@ -330,12 +357,15 @@ class TestPinchClick:
         # Pinch without activation pose (no index pose, just fingers touching).
         for _ in range(5):
             ts += FRAME_NS
-            det.process(_frame(
-                _build_hand(
-                    index_up=False, thumb_tip_xy=(0.5, 0.4),
-                ),
-                ts_ns=ts,
-            ))
+            det.process(
+                _frame(
+                    _build_hand(
+                        index_up=False,
+                        thumb_tip_xy=(0.5, 0.4),
+                    ),
+                    ts_ns=ts,
+                )
+            )
         assert mouse.clicks == []
 
     def test_sustained_pinch_only_one_click_until_release(self) -> None:
@@ -349,10 +379,12 @@ class TestPinchClick:
         # Pinch and hold for many frames.
         for _ in range(10):
             ts += FRAME_NS
-            det.process(_frame(
-                _build_hand(thumb_tip_xy=(0.5, 0.4)),
-                ts_ns=ts,
-            ))
+            det.process(
+                _frame(
+                    _build_hand(thumb_tip_xy=(0.5, 0.4)),
+                    ts_ns=ts,
+                )
+            )
         assert len(mouse.clicks) == 1
 
     def test_release_then_pinch_again_fires_second_click(self) -> None:
@@ -378,6 +410,7 @@ class TestPinchClick:
 
 # --- Dead zone -----------------------------------------------------
 
+
 class TestDeadZone:
     def test_dead_zone_suppresses_micro_jitter(self) -> None:
         det, mouse = _make_detector(
@@ -395,15 +428,18 @@ class TestDeadZone:
         # Wiggle the index tip by < 0.001 (way less than 10 px after mapping).
         for i in range(5):
             ts += FRAME_NS
-            det.process(_frame(
-                _build_hand(index_xy=(0.5 + 0.0005 * i, 0.5)),
-                ts_ns=ts,
-            ))
+            det.process(
+                _frame(
+                    _build_hand(index_xy=(0.5 + 0.0005 * i, 0.5)),
+                    ts_ns=ts,
+                )
+            )
         # The first move-after-activation lands; later micro-jitter is suppressed.
         assert len(mouse.moves) - initial_moves <= 1
 
 
 # --- Hand-lost handling -------------------------------------------
+
 
 class TestHandLost:
     def test_brief_hand_loss_keeps_active(self) -> None:
@@ -433,6 +469,7 @@ class TestHandLost:
 
 
 # --- Process-return contract --------------------------------------
+
 
 class TestProcessReturn:
     def test_returns_true_when_active(self) -> None:

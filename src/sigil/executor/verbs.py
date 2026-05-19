@@ -217,15 +217,13 @@ def system_screenshot() -> bool:
 # VS Code's main window has class "Chrome_WidgetWin_1" which is too
 # generic to match on alone, so we additionally check window title.
 _TERMINAL_WINDOW_CLASSES: tuple[str, ...] = (
-    "CASCADIA_HOSTING_WINDOW_CLASS",   # Windows Terminal
-    "ConsoleWindowClass",              # cmd.exe / classic console
-    "VirtualConsoleClass",             # Windows Terminal (older builds)
-    "PuTTY",                           # PuTTY
-    "mintty",                          # MinTTY / Git Bash
+    "CASCADIA_HOSTING_WINDOW_CLASS",  # Windows Terminal
+    "ConsoleWindowClass",  # cmd.exe / classic console
+    "VirtualConsoleClass",  # Windows Terminal (older builds)
+    "PuTTY",  # PuTTY
+    "mintty",  # MinTTY / Git Bash
 )
-_VSCODE_TITLE_HINTS: tuple[str, ...] = (
-    "Visual Studio Code",
-)
+_VSCODE_TITLE_HINTS: tuple[str, ...] = ("Visual Studio Code",)
 
 
 def _find_terminal_hwnd() -> int | None:
@@ -254,7 +252,7 @@ def _find_terminal_hwnd() -> int | None:
             return True
         try:
             cls = win32gui.GetClassName(hwnd)
-        except Exception:   # noqa: BLE001
+        except Exception:  # noqa: BLE001
             return True
         if cls in _TERMINAL_WINDOW_CLASSES:
             if terminal_hwnd is None:
@@ -264,7 +262,7 @@ def _find_terminal_hwnd() -> int | None:
         if vscode_hwnd is None:
             try:
                 title = win32gui.GetWindowText(hwnd)
-            except Exception:   # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 return True
             if any(hint in title for hint in _VSCODE_TITLE_HINTS):
                 vscode_hwnd = hwnd
@@ -290,8 +288,8 @@ def system_launch_terminal() -> bool:
         import win32gui
     except ImportError:
         log.warning("verb_partial_dep", verb="system.launch_terminal", dep="pywin32")
-        win32gui = None   # type: ignore[assignment]
-        win32con = None   # type: ignore[assignment]
+        win32gui = None  # type: ignore[assignment]
+        win32con = None  # type: ignore[assignment]
 
     if win32gui is not None:
         hwnd = _find_terminal_hwnd()
@@ -303,10 +301,11 @@ def system_launch_terminal() -> bool:
                 win32gui.SetForegroundWindow(hwnd)
                 log.info("terminal_focused", hwnd=hwnd)
                 return True
-            except Exception as exc:   # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 log.warning(
                     "terminal_focus_failed",
-                    hwnd=hwnd, error=str(exc),
+                    hwnd=hwnd,
+                    error=str(exc),
                 )
                 # Fall through to launch path.
 
@@ -321,10 +320,11 @@ def system_launch_terminal() -> bool:
             return True
         except FileNotFoundError:
             continue
-        except Exception as exc:   # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             log.warning(
                 "terminal_launch_failed",
-                cmd=cmd[0], error=str(exc),
+                cmd=cmd[0],
+                error=str(exc),
             )
             continue
 

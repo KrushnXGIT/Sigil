@@ -56,6 +56,7 @@ def dataset_v1() -> None:
 def instructions_cmd(dest: Path) -> None:
     """Print download + extraction instructions for 20BN-Jester."""
     from sigil.intelligence.dataset.jester import print_download_instructions
+
     console.print(print_download_instructions(dest))
 
 
@@ -79,6 +80,7 @@ def validate_cmd(root: Path) -> None:
         JesterError,
         validate_jester_layout,
     )
+
     try:
         validate_jester_layout(root)
     except JesterError as exc:
@@ -114,7 +116,7 @@ def validate_cmd(root: Path) -> None:
     type=int,
     default=None,
     help="Cap records per Sigil class per split. Use 50 for a "
-         "~5-minute pipeline-validation run. Omit for full preprocessing.",
+    "~5-minute pipeline-validation run. Omit for full preprocessing.",
 )
 @click.option(
     "--splits",
@@ -138,10 +140,10 @@ def build_cmd(
         from sigil.intelligence.dataset.jester import (
             ANNOTATIONS_DIRNAME,
             JESTER_TO_SIGIL_V1,
-            JesterError,
             TRAIN_CSV,
             VAL_CSV,
             VIDEOS_DIRNAME,
+            JesterError,
             filter_to_v1_classes,
             parse_jester_csv,
             validate_jester_layout,
@@ -173,8 +175,7 @@ def build_cmd(
     chosen = [(s, split_csvs[s]) for s in requested if s in split_csvs]
     if not chosen:
         console.print(
-            f"[red]No valid splits in {splits!r}. "
-            f"Available: {list(split_csvs)}[/red]",
+            f"[red]No valid splits in {splits!r}. " f"Available: {list(split_csvs)}[/red]",
         )
         sys.exit(2)
 
@@ -205,7 +206,8 @@ def build_cmd(
 
             if max_per_class is not None:
                 records = filter_to_v1_classes(
-                    records, max_per_class=max_per_class,
+                    records,
+                    max_per_class=max_per_class,
                 )
                 console.print(
                     f"  Capped at {max_per_class}/class → {len(records)} records",
@@ -221,7 +223,7 @@ def build_cmd(
                 f"  Preprocessing {len(records)} videos through MediaPipe…",
             )
             console.print(
-                f"  [dim](progress logged every 100 videos to structlog)[/dim]",
+                "  [dim](progress logged every 100 videos to structlog)[/dim]",
             )
 
             try:
@@ -260,7 +262,7 @@ def build_cmd(
 
     console.print("\n[bold green]Build complete.[/bold green]")
     console.print(
-        f"[dim]Next: train the V1 model (V1 patch 2 — coming separately).[/dim]",
+        "[dim]Next: train the V1 model (V1 patch 2 — coming separately).[/dim]",
     )
 
 

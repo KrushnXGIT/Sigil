@@ -50,7 +50,7 @@ log = get_logger(__name__)
 
 # Per ADR-0012. Don't change without updating the model input dim.
 SEQUENCE_LENGTH = 36
-N_FEATURES = N_LANDMARKS * (N_COORDS + N_COORDS)   # 21 * (2 + 2) = 84
+N_FEATURES = N_LANDMARKS * (N_COORDS + N_COORDS)  # 21 * (2 + 2) = 84
 
 # Where Jester's frame JPGs live within a video folder.
 _FRAME_GLOB = "*.jpg"
@@ -76,7 +76,7 @@ class PreprocessingStats:
 def extract_sequence_from_video(
     video_dir: Path,
     *,
-    landmarker,   # HandLandmarkerWrapper (already opened)
+    landmarker,  # HandLandmarkerWrapper (already opened)
     base_frame_index: int = 0,
 ) -> np.ndarray | None:
     """Extract a (SEQUENCE_LENGTH, N_FEATURES) sequence from one video.
@@ -96,8 +96,7 @@ def extract_sequence_from_video(
         import cv2
     except ImportError as exc:
         raise ImportError(
-            "Preprocessing needs opencv-python. Install with:\n"
-            "    uv sync --extra perception",
+            "Preprocessing needs opencv-python. Install with:\n" "    uv sync --extra perception",
         ) from exc
 
     frame_paths = sorted(video_dir.glob(_FRAME_GLOB))
@@ -121,17 +120,19 @@ def extract_sequence_from_video(
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
         captured = CapturedFrame(
-            timestamp_ns=offset * 1_000_000_000 // 30,   # synthetic, monotonic
+            timestamp_ns=offset * 1_000_000_000 // 30,  # synthetic, monotonic
             frame_index=base_frame_index + offset,
             pixels=rgb,
         )
 
         try:
             frame = landmarker.process(captured)
-        except Exception as exc:   # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             log.debug(
                 "landmarker_process_failed",
-                video_dir=str(video_dir), frame=fp.name, error=str(exc),
+                video_dir=str(video_dir),
+                frame=fp.name,
+                error=str(exc),
             )
             raw_positions.append(_zero_keypoints())
             continue
@@ -141,7 +142,7 @@ def extract_sequence_from_video(
             raw_positions.append(_zero_keypoints())
             continue
 
-        keypoints = hand.keypoints   # raw image-normalised [0,1] coords
+        keypoints = hand.keypoints  # raw image-normalised [0,1] coords
         if keypoints.shape != (N_LANDMARKS, N_COORDS):
             raw_positions.append(_zero_keypoints())
             continue
@@ -170,7 +171,7 @@ def extract_sequence_from_video(
         padding = [_zero_keypoints() for _ in range(pad_count)]
         raw_positions = padding + raw_positions
 
-    positions = np.stack(raw_positions, axis=0)   # (T, 21, 2)
+    positions = np.stack(raw_positions, axis=0)  # (T, 21, 2)
 
     # Velocity = frame N - frame N-1. First frame: zeros.
     velocity = np.zeros_like(positions)
@@ -179,13 +180,13 @@ def extract_sequence_from_video(
     # Flatten landmarks+coords per frame → (T, 84).
     pos_flat = positions.reshape(SEQUENCE_LENGTH, N_LANDMARKS * N_COORDS)
     vel_flat = velocity.reshape(SEQUENCE_LENGTH, N_LANDMARKS * N_COORDS)
-    sequence = np.concatenate([pos_flat, vel_flat], axis=1)   # (T, 84)
+    sequence = np.concatenate([pos_flat, vel_flat], axis=1)  # (T, 84)
 
     return sequence.astype(np.float32)
 
 
 def preprocess_records(
-    records: list,   # list[JesterRecord]; typed loosely to avoid circular imports
+    records: list,  # list[JesterRecord]; typed loosely to avoid circular imports
     *,
     landmarker,
     progress_every: int = 100,
@@ -207,10 +208,17 @@ def preprocess_records(
     if n_total == 0:
         empty_seq = np.zeros((0, SEQUENCE_LENGTH, N_FEATURES), dtype=np.float32)
         empty_lbl = np.array([], dtype=object)
-        return empty_seq, empty_lbl, [], PreprocessingStats(
-            total_videos=0, successful=0,
-            failed_no_landmarks_any_frame=0, failed_io_error=0,
-            elapsed_seconds=0.0,
+        return (
+            empty_seq,
+            empty_lbl,
+            [],
+            PreprocessingStats(
+                total_videos=0,
+                successful=0,
+                failed_no_landmarks_any_frame=0,
+                failed_io_error=0,
+                elapsed_seconds=0.0,
+            ),
         )
 
     sequences: list[np.ndarray] = []
@@ -230,7 +238,7 @@ def preprocess_records(
         except FileNotFoundError:
             failed_io += 1
             continue
-        except Exception as exc:   # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             log.warning(
                 "preprocess_video_failed",
                 video_id=rec.video_id,
@@ -253,7 +261,8 @@ def preprocess_records(
             eta = (n_total - idx) / rate if rate > 0 else 0.0
             log.info(
                 "preprocess_progress",
-                processed=idx, total=n_total,
+                processed=idx,
+                total=n_total,
                 rate_per_sec=f"{rate:.1f}",
                 eta_minutes=f"{eta / 60:.1f}",
                 successful=len(sequences),

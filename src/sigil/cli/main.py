@@ -23,9 +23,6 @@ from sigil import __version__
 from sigil.config import ConfigError, load_config, user_config_file
 from sigil.logging import setup_logging
 
-
-
-
 console = Console()
 
 
@@ -61,6 +58,7 @@ cli.add_command(_perception_group)
 cli.add_command(_dataset_group)
 
 from sigil.cli.dataset_v1 import dataset_v1
+
 cli.add_command(dataset_v1)
 
 from sigil.cli.daemon import daemon as _daemon_group  # noqa: E402

@@ -45,8 +45,8 @@ class WriteResult:
 
 
 def write_temporal_records(
-    sequences: np.ndarray,           # (N, T, F) float32
-    labels: np.ndarray,              # (N,) object/str
+    sequences: np.ndarray,  # (N, T, F) float32
+    labels: np.ndarray,  # (N,) object/str
     video_ids: list[str],
     split: str,
     output_path: Path,
@@ -62,8 +62,7 @@ def write_temporal_records(
         import pyarrow.parquet as pq
     except ImportError as exc:
         raise ImportError(
-            "Temporal storage needs pyarrow. Install with:\n"
-            "    uv sync --extra training",
+            "Temporal storage needs pyarrow. Install with:\n" "    uv sync --extra training",
         ) from exc
 
     if sequences.ndim != 3:
@@ -78,8 +77,7 @@ def write_temporal_records(
         )
     if len(labels) != n or len(video_ids) != n:
         raise ValueError(
-            f"Length mismatch: sequences={n}, labels={len(labels)}, "
-            f"video_ids={len(video_ids)}",
+            f"Length mismatch: sequences={n}, labels={len(labels)}, " f"video_ids={len(video_ids)}",
         )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -88,21 +86,25 @@ def write_temporal_records(
     flat = sequences.reshape(n, t * f).astype(np.float32)
     sequence_lists = [arr.tolist() for arr in flat]
 
-    table = pa.table({
-        "sequence_id": pa.array(video_ids, type=pa.string()),
-        "label": pa.array([str(x) for x in labels], type=pa.string()),
-        "split": pa.array([split] * n, type=pa.string()),
-        "sequence": pa.array(sequence_lists, type=pa.list_(pa.float32())),
-        "seq_length": pa.array([t] * n, type=pa.int32()),
-        "n_features": pa.array([f] * n, type=pa.int32()),
-    })
+    table = pa.table(
+        {
+            "sequence_id": pa.array(video_ids, type=pa.string()),
+            "label": pa.array([str(x) for x in labels], type=pa.string()),
+            "split": pa.array([split] * n, type=pa.string()),
+            "sequence": pa.array(sequence_lists, type=pa.list_(pa.float32())),
+            "seq_length": pa.array([t] * n, type=pa.int32()),
+            "n_features": pa.array([f] * n, type=pa.int32()),
+        }
+    )
 
     pq.write_table(table, output_path, compression="snappy")
 
     size_mb = output_path.stat().st_size / (1024 * 1024)
     log.info(
         "temporal_parquet_written",
-        path=str(output_path), rows=n, size_mb=f"{size_mb:.2f}",
+        path=str(output_path),
+        rows=n,
+        size_mb=f"{size_mb:.2f}",
     )
     return WriteResult(path=output_path, rows=n, size_mb=size_mb)
 
@@ -145,7 +147,8 @@ def read_temporal_arrays(
 
     log.info(
         "temporal_parquet_read",
-        path=str(parquet_path), rows=n,
+        path=str(parquet_path),
+        rows=n,
     )
     return sequences, labels, video_ids
 

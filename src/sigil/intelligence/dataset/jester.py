@@ -50,9 +50,7 @@ JESTER_TO_SIGIL_V1: dict[str, str] = {
 # Order is alphabetical for determinism — the trainer rebuilds this
 # from the parquet label column, but having a canonical order makes
 # debugging easier.
-SIGIL_V1_CLASSES: tuple[str, ...] = tuple(
-    sorted(set(JESTER_TO_SIGIL_V1.values()))
-)
+SIGIL_V1_CLASSES: tuple[str, ...] = tuple(sorted(set(JESTER_TO_SIGIL_V1.values())))
 
 # Standard Jester directory + file names. These match the layout
 # produced by the Kaggle mirrors and the original 20BN distribution.
@@ -76,7 +74,7 @@ class JesterRecord:
     video_dir: Path
     jester_label: str
     sigil_label: str
-    split: str   # "train" | "val" | "test"
+    split: str  # "train" | "val" | "test"
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,7 +186,7 @@ def validate_jester_layout(root: Path) -> None:
             raise JesterError(
                 f"Video dir {vd} has no .jpg frames — unzip may be partial.",
             )
-        break   # one good sample is enough
+        break  # one good sample is enough
 
     log.info(
         "jester_layout_validated",
@@ -257,17 +255,21 @@ def parse_jester_csv(
             skipped_missing += 1
             log.debug(
                 "skipping_missing_video",
-                csv=str(csv_path), video_id=video_id, row=row_idx,
+                csv=str(csv_path),
+                video_id=video_id,
+                row=row_idx,
             )
             continue
 
-        records.append(JesterRecord(
-            video_id=video_id,
-            video_dir=video_dir,
-            jester_label=label,
-            sigil_label=sigil_label,
-            split=split,
-        ))
+        records.append(
+            JesterRecord(
+                video_id=video_id,
+                video_dir=video_dir,
+                jester_label=label,
+                sigil_label=sigil_label,
+                split=split,
+            )
+        )
         per_sigil[sigil_label] += 1
 
     stats = JesterStats(
@@ -279,7 +281,8 @@ def parse_jester_csv(
     )
     log.info(
         "jester_csv_parsed",
-        csv=csv_path.name, split=split,
+        csv=csv_path.name,
+        split=split,
         records=len(records),
         skipped_unknown=skipped_unknown,
         skipped_missing=skipped_missing,
@@ -305,6 +308,7 @@ def filter_to_v1_classes(
         return records
 
     import random
+
     rng = random.Random(seed)
     by_class: dict[str, list[JesterRecord]] = {}
     for r in records:

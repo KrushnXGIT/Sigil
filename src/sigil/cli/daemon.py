@@ -76,6 +76,15 @@ def daemon() -> None:
     help="Enable Tier 2 swipe detection and Tier 3 pointer mode. "
     "Default OFF — V0 ships static gestures only by default.",
 )
+
+@click.option(
+    "--ww", "--wake-word", "enable_wake_word",
+    is_flag=True, default=False,
+    help="Gate activation behind the voice wake word ('Hey Jarvis'). "
+         "Disables auto-activation; the system stays dormant until the "
+         "phrase is spoken.",
+)
+
 def run(
     model_path: Path | None,
     no_auto_activate: bool,
@@ -83,6 +92,7 @@ def run(
     detection_threshold: float | None,
     overlay: bool,
     enable_dynamic: bool,
+    enable_wake_word: bool,
 ) -> None:
     """Start the Sigil daemon. Ctrl+C to stop."""
     from sigil.daemon.runtime import SigilDaemon
@@ -130,6 +140,7 @@ def run(
             on_event=on_event,
             enable_swipes=enable_dynamic,
             enable_pointer=enable_dynamic,
+            enable_wake_word=enable_wake_word
         )
     except (FileNotFoundError, ValueError) as exc:
         console.print(f"[red]Failed to start daemon:[/red] {exc}")
@@ -269,10 +280,12 @@ def _print_startup_banner(
     console.print(
         f"  Det threshold:   {sigil.classifier.detection_threshold:.2f}",
     )
-    console.print(
-        f"  Auto-activate:   "
-        f"{'NO (wake word required)' if no_auto_activate else 'YES (Patch 2 default)'}",
-    )
+    if sigil.wake_word_enabled:
+        console.print(f"  Activation:      wake word ('{sigil.wake_phrase}')")
+    elif no_auto_activate:
+        console.print("  Activation:      manual (dormant until gesture)")
+    else:
+        console.print("  Activation:      auto (show a gesture)")
     console.print(f"  Overlay:         {'YES (Sigi)' if overlay else 'no'}")
     console.print(
         f"  Dynamic (swipe + pointer): " f"{'YES' if enable_dynamic else 'NO (--ed to enable)'}",
@@ -286,7 +299,7 @@ def _print_startup_banner(
     else:
         console.print(
             "[dim]Ctrl+C to stop. Logs go to the structlog stream above.[/dim]",
-        )
+        )   
     console.print()
 
 

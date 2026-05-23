@@ -1,0 +1,37 @@
+SIGIL WAKE-WORD PATCH
+=====================
+
+WHAT THIS ADDS
+  Voice wake word "Hey Jarvis" (pretrained OpenWakeWord, no training).
+  Opt-in via --ww. When on, the system stays dormant until you say the
+  phrase, then listens for gestures, then returns to dormant after 60s
+  idle (handled by the interpreter's existing timeout).
+
+FILES (copy into your repo, overwriting):
+  src/sigil/wakeword/__init__.py   (was the "not yet implemented" stub)
+  src/sigil/wakeword/listener.py   (NEW - the listener)
+  src/sigil/daemon/runtime.py      (REPLACES current - adds wake-word wiring)
+
+DEPENDENCIES (install first):
+  pip install openwakeword sounddevice
+  (openwakeword pulls onnxruntime, which you already have. First run
+   downloads the pretrained models automatically - needs internet once.)
+
+STILL TO DO BY HAND - cli/daemon.py:
+  Add the --ww flag to the `run` command. See chat for the exact edit,
+  or paste your daemon.py and I'll do it for you.
+
+TEST (in sigil-test folder):
+  uv run sigil daemon run --overlay --ww
+  Then SAY "Hey Jarvis" -> overlay should wake (DORMANT -> LISTENING)
+  Then show a gesture -> it fires
+  Wait 60s idle -> back to DORMANT, say "Hey Jarvis" again
+
+NOTES
+  - Default activation is UNCHANGED. Without --ww you get the same
+    auto-activate V0 behaviour. --ww is purely additive.
+  - If openwakeword/sounddevice are missing or the mic fails, the daemon
+    logs a warning and falls back to auto-activation (won't crash).
+  - Wake model + threshold are configurable in code (WakeWordListener):
+    model_key="hey_jarvis", threshold=0.5. Raise threshold if it
+    false-fires; lower it if it misses.

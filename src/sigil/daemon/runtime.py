@@ -14,9 +14,14 @@ Topology::
         → Dispatcher               (verb registry, exception isolation)
         → OS actions
 
-The loop is single-threaded and synchronous on purpose. The whole
-chain — capture, MediaPipe, normalise, ONNX, FSM, dispatch — fits
-inside one frame budget at 30 FPS on a 2-core CPU.
+    Microphone (optional, --ww)
+        → WakeWordListener (background thread)
+            └─ sets a thread-safe flag; the MAIN loop consumes it and
+               drives the interpreter DORMANT → LISTENING transition.
+
+The camera loop is single-threaded and synchronous on purpose. The
+wake-word listener is the one background thread, and it never touches
+the interpreter directly — it only raises a flag the main loop reads.
 
 Tier ordering rationale:
   - Pointer runs first because when ACTIVE it owns the input modality
@@ -27,16 +32,15 @@ Tier ordering rationale:
     motion. If a swipe is detected, prefer it.
   - Static runs only when neither of the above fired.
 
-Patch-3 addition (preserved): an optional ``on_event`` callback that
-fires once per frame with a snapshot of "what the overlay should be
-showing." Backward-compatible — pass nothing and the daemon emits
-nothing.
-
-Phase 4 Patch 1 addition: PointerDetector integration with
-defensive initialisation. If pointer construction fails (e.g.
-pynput unavailable or screen-size detection broken), the failure
-is logged loudly and the daemon continues without pointer support,
-preserving Tier 1 + Tier 2 functionality.
+Wake-word behaviour (--ww):
+  - When enabled, ``auto_activate`` is forced False: the interpreter
+    starts DORMANT and ignores all gestures until the wake phrase
+    ("Hey Jarvis") fires.
+  - On detection, the main loop calls interpreter.activate(), moving
+    it to LISTENING.
+  - The interpreter's existing 60 s idle timeout returns it to
+    DORMANT, after which the wake word is required again. No new
+    timeout logic needed here.
 """
 
 from __future__ import annotations
@@ -65,6 +69,7 @@ class DaemonStats:
     dispatches_succeeded: int = 0
     dispatches_failed: int = 0
     auto_activations: int = 0
+    wake_activations: int = 0
     pointer_active_frames: int = 0
     started_at_ns: int = 0
     stopped_at_ns: int = 0
@@ -90,7 +95,8 @@ class SigilDaemon:
     Parameters:
         model_path: path to the ``.onnx`` produced by export_onnx.
         auto_activate_on_gesture: while True (default), any classified
-            gesture pulls the interpreter out of DORMANT.
+            gesture pulls the interpreter out of DORMANT. Forced False
+            when ``enable_wake_word`` is True.
         confidence_threshold / detection_threshold: forwarded to
             :class:`ClassifierRuntime`.
         on_event: optional callable invoked once per frame with the
@@ -101,6 +107,15 @@ class SigilDaemon:
             construction fails (pynput missing, screen-size broken),
             the failure is logged and the daemon continues without
             pointer support.
+        enable_wake_word: gate activation behind the voice wake word
+            ("Hey Jarvis"). Default False. When True, auto-activation is
+            disabled and the interpreter stays DORMANT until the wake
+            phrase is detected. If the wake-word subsystem fails to
+            initialise, the failure is logged and the daemon falls back
+            to auto-activation so the camera path still works.
+        wake_word_model: pretrained OpenWakeWord key (default
+            "hey_jarvis").
+        wake_word_threshold: detection score threshold (default 0.5).
     """
 
     def __init__(
@@ -113,6 +128,9 @@ class SigilDaemon:
         on_event: Callable | None = None,
         enable_swipes: bool = True,
         enable_pointer: bool = True,
+        enable_wake_word: bool = False,
+        wake_word_model: str = "hey_jarvis",
+        wake_word_threshold: float = 0.5,
     ) -> None:
         if confidence_threshold is None and detection_threshold is None:
             self.classifier = ClassifierRuntime(model_path)
@@ -125,9 +143,6 @@ class SigilDaemon:
             self.classifier = ClassifierRuntime(model_path, **kwargs)
 
         # Tier 2: swipe detector runs alongside the static classifier.
-        # When a swipe is detected, it takes priority — the static
-        # classifier's output during fast hand motion is meaningless
-        # (it was trained on stationary poses).
         self.swipe_detector = None
         if enable_swipes:
             from sigil.intelligence.swipe_detector import SwipeDetector
@@ -135,9 +150,6 @@ class SigilDaemon:
             self.swipe_detector = SwipeDetector()
 
         # Tier 3: pointer detector with defensive initialisation.
-        # If pointer construction fails for any reason (pynput
-        # import, screen-size detection, OS-level call), we log the
-        # failure loudly and keep going. Tier 1 + Tier 2 still work.
         self.pointer_detector = None
         if enable_pointer:
             try:
@@ -153,9 +165,39 @@ class SigilDaemon:
                 )
                 self.pointer_detector = None
 
+        # Wake word: defensive initialisation. If it fails, fall back to
+        # auto-activation so the camera path still works.
+        self.wake_listener = None
+        self._wake_word_enabled = False
+        if enable_wake_word:
+            try:
+                from sigil.wakeword.listener import WakeWordListener
+
+                self.wake_listener = WakeWordListener(
+                    model_key=wake_word_model,
+                    threshold=wake_word_threshold,
+                )
+                self._wake_word_enabled = True
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "wake_word_init_failed",
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                    note="falling back to auto-activation",
+                )
+                self.wake_listener = None
+                self._wake_word_enabled = False
+
         self.interpreter = Interpreter()
         self.dispatcher = Dispatcher()
-        self.auto_activate = auto_activate_on_gesture
+
+        # Wake word gates activation: when on, auto-activate is off so the
+        # interpreter stays DORMANT until the phrase fires.
+        if self._wake_word_enabled:
+            self.auto_activate = False
+        else:
+            self.auto_activate = auto_activate_on_gesture
+
         self.on_event = on_event
 
         self.stats = DaemonStats()
@@ -165,6 +207,14 @@ class SigilDaemon:
         self._last_action: str | None = None
         self._last_action_succeeded: bool | None = None
         self._last_action_at_ns: int | None = None
+
+    @property
+    def wake_word_enabled(self) -> bool:
+        return self._wake_word_enabled
+
+    @property
+    def wake_phrase(self) -> str | None:
+        return self.wake_listener.phrase if self.wake_listener else None
 
     def stop(self) -> None:
         """Request a graceful loop exit from the next iteration."""
@@ -176,9 +226,31 @@ class SigilDaemon:
 
         options = PipelineOptions()
 
+        # Start the wake-word listener (background thread) before the
+        # camera loop. If start() raises, fall back to auto-activation.
+        if self.wake_listener is not None:
+            try:
+                self.wake_listener.start()
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "wake_word_start_failed",
+                    error=str(exc),
+                    note="falling back to auto-activation",
+                )
+                self.wake_listener = None
+                self._wake_word_enabled = False
+                self.auto_activate = True
+
         now_ns = time.monotonic_ns()
         self.stats.started_at_ns = now_ns
-        if self.auto_activate:
+
+        if self._wake_word_enabled:
+            # Stay dormant; wait for the wake phrase.
+            log.info(
+                "daemon_started_wake_word_gated",
+                phrase=self.wake_phrase,
+            )
+        elif self.auto_activate:
             self.interpreter.activate(now_ns)
             self.stats.auto_activations += 1
             log.info("daemon_started_auto_activated")
@@ -194,6 +266,8 @@ class SigilDaemon:
         except KeyboardInterrupt:
             log.info("daemon_interrupted_by_user")
         finally:
+            if self.wake_listener is not None:
+                self.wake_listener.stop()
             self.stats.stopped_at_ns = time.monotonic_ns()
             self.stats.per_action = self.dispatcher.stats()
             log.info(
@@ -201,6 +275,7 @@ class SigilDaemon:
                 frames=self.stats.frames_processed,
                 dispatches=self.stats.dispatches_succeeded,
                 failures=self.stats.dispatches_failed,
+                wake_activations=self.stats.wake_activations,
                 pointer_active_frames=self.stats.pointer_active_frames,
                 avg_fps=f"{self.stats.average_fps:.1f}",
             )
@@ -210,20 +285,29 @@ class SigilDaemon:
         """Process a single LandmarkFrame end-to-end."""
         self.stats.frames_processed += 1
         try:
+            # --- Wake word: consume any pending detection on the MAIN
+            #     thread and drive the interpreter activation here.
+            if self.wake_listener is not None and self.wake_listener.consume_wake():
+                if self.interpreter.state == InterpreterState.DORMANT:
+                    self.interpreter.activate(frame.timestamp_ns)
+                    self.stats.wake_activations += 1
+                    log.info(
+                        "wake_word_activated_interpreter",
+                        phrase=self.wake_phrase,
+                        frame_index=frame.frame_index,
+                    )
+                else:
+                    # Already listening; treat a repeat as a keep-alive.
+                    self.interpreter.activate(frame.timestamp_ns)
+
             # --- Tier 3: pointer mode. If ACTIVE, it owns the
             #     input modality this frame — skip swipe and static.
             if self.pointer_detector is not None:
                 if self.pointer_detector.process(frame):
                     self.stats.pointer_active_frames += 1
-                    # Don't emit overlay-cursor-update events;
-                    # overlay still reflects the most recent
-                    # non-pointer state.
                     return
 
             # --- Tier 2: swipe detector runs before static classifier.
-            #     If a swipe is detected, it takes priority — the
-            #     static classifier's output during fast hand motion
-            #     is unreliable (trained on stationary poses).
             swipe_events: tuple = ()
             if self.swipe_detector is not None:
                 swipe_events = self.swipe_detector.process(frame)
@@ -236,13 +320,12 @@ class SigilDaemon:
 
             self.stats.events_classified += len(events)
 
-            # Cache the highest-confidence gesture for the overlay,
-            # mirroring the interpreter's Tier 1 selection rule.
             if events:
                 selected = max(events, key=lambda e: e.confidence)
                 self._last_gesture = selected.gesture
                 self._last_gesture_confidence = selected.confidence
 
+            # Auto-activation path (only when wake word is OFF).
             if self.auto_activate and events and self.interpreter.state == InterpreterState.DORMANT:
                 self.interpreter.activate(frame.timestamp_ns)
                 self.stats.auto_activations += 1
@@ -256,9 +339,6 @@ class SigilDaemon:
                     self.stats.dispatches_succeeded += 1
                 else:
                     self.stats.dispatches_failed += 1
-                # Cache the most recent dispatch for the overlay,
-                # regardless of success — overlay reacts differently
-                # to HAPPY vs SAD moods.
                 self._last_action = action.action
                 self._last_action_succeeded = ok
                 self._last_action_at_ns = frame.timestamp_ns
@@ -270,15 +350,11 @@ class SigilDaemon:
             )
             return
 
-        # Emit overlay event LAST so it always reflects the final
-        # post-frame state.
         if self.on_event is not None:
             self._emit_overlay_event(frame)
 
     def _emit_overlay_event(self, frame) -> None:
         """Build and emit an OverlayEvent. Errors swallowed."""
-        # Import inside to avoid importing the UI layer when the
-        # caller hasn't opted in.
         try:
             from sigil.ui.state import OverlayEvent
         except ImportError:

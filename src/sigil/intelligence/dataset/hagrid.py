@@ -68,6 +68,10 @@ GESTURE_NAME_MAP: dict[str, str] = {
     "one": "one",
     # Negative class — must be present in every training run.
     "no_gesture": "no_gesture",
+    "two_up": "two_up",
+    "little_finger": "little_finger",
+    "thumb_index": "thumb_index",
+    "grabbing": "grabbing",
 }
 
 

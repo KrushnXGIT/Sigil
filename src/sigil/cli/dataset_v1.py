@@ -56,7 +56,6 @@ def dataset_v1() -> None:
 def instructions_cmd(dest: Path) -> None:
     """Print download + extraction instructions for 20BN-Jester."""
     from sigil.intelligence.dataset.jester import print_download_instructions
-
     console.print(print_download_instructions(dest))
 
 
@@ -80,7 +79,6 @@ def validate_cmd(root: Path) -> None:
         JesterError,
         validate_jester_layout,
     )
-
     try:
         validate_jester_layout(root)
     except JesterError as exc:
@@ -116,7 +114,7 @@ def validate_cmd(root: Path) -> None:
     type=int,
     default=None,
     help="Cap records per Sigil class per split. Use 50 for a "
-    "~5-minute pipeline-validation run. Omit for full preprocessing.",
+         "~5-minute pipeline-validation run. Omit for full preprocessing.",
 )
 @click.option(
     "--splits",
@@ -138,15 +136,14 @@ def build_cmd(
     """
     try:
         from sigil.intelligence.dataset.jester import (
-            ANNOTATIONS_DIRNAME,
             JESTER_TO_SIGIL_V1,
-            TRAIN_CSV,
-            VAL_CSV,
-            VIDEOS_DIRNAME,
             JesterError,
+            SPLIT_CSV_NAMES,
+            csv_path_for_split,
             filter_to_v1_classes,
             parse_jester_csv,
             validate_jester_layout,
+            videos_dir_for_split,
         )
         from sigil.intelligence.dataset.temporal_preprocessing import (
             preprocess_records,
@@ -167,15 +164,13 @@ def build_cmd(
         sys.exit(2)
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    annotations = root / ANNOTATIONS_DIRNAME
-    videos = root / VIDEOS_DIRNAME
 
-    split_csvs = {"train": TRAIN_CSV, "val": VAL_CSV}
     requested = [s.strip() for s in splits.split(",") if s.strip()]
-    chosen = [(s, split_csvs[s]) for s in requested if s in split_csvs]
+    chosen = [s for s in requested if s in SPLIT_CSV_NAMES]
     if not chosen:
         console.print(
-            f"[red]No valid splits in {splits!r}. " f"Available: {list(split_csvs)}[/red]",
+            f"[red]No valid splits in {splits!r}. "
+            f"Available: {list(SPLIT_CSV_NAMES)}[/red]",
         )
         sys.exit(2)
 
@@ -185,8 +180,9 @@ def build_cmd(
     landmarker = HandLandmarkerWrapper(num_hands=1)
 
     with landmarker:
-        for split_name, csv_filename in chosen:
-            csv_path = annotations / csv_filename
+        for split_name in chosen:
+            csv_path = csv_path_for_split(root, split_name)
+            videos = videos_dir_for_split(root, split_name)
             console.print(f"\n[bold cyan]=== Split: {split_name} ===[/bold cyan]")
             console.print(f"Parsing {csv_path}…")
 
@@ -206,8 +202,7 @@ def build_cmd(
 
             if max_per_class is not None:
                 records = filter_to_v1_classes(
-                    records,
-                    max_per_class=max_per_class,
+                    records, max_per_class=max_per_class,
                 )
                 console.print(
                     f"  Capped at {max_per_class}/class → {len(records)} records",
@@ -223,7 +218,7 @@ def build_cmd(
                 f"  Preprocessing {len(records)} videos through MediaPipe…",
             )
             console.print(
-                "  [dim](progress logged every 100 videos to structlog)[/dim]",
+                f"  [dim](progress logged every 100 videos to structlog)[/dim]",
             )
 
             try:
@@ -262,7 +257,7 @@ def build_cmd(
 
     console.print("\n[bold green]Build complete.[/bold green]")
     console.print(
-        "[dim]Next: train the V1 model (V1 patch 2 — coming separately).[/dim]",
+        f"[dim]Next: train the V1 model (V1 patch 2 — coming separately).[/dim]",
     )
 
 

@@ -142,12 +142,30 @@ class SigilDaemon:
                 kwargs["detection_threshold"] = detection_threshold
             self.classifier = ClassifierRuntime(model_path, **kwargs)
 
-        # Tier 2: swipe detector runs alongside the static classifier.
+        # Tier 2: swipe detector. Prefer the LEARNED temporal model
+        # (ADR-0012); fall back to the rule-based detector if the ONNX
+        # model is missing or fails to load, so --ed always works.
         self.swipe_detector = None
+        self.swipe_source = None
         if enable_swipes:
-            from sigil.intelligence.swipe_detector import SwipeDetector
+            try:
+                from sigil.intelligence.temporal_swipe_detector import (
+                    TemporalSwipeDetector,
+                )
 
-            self.swipe_detector = SwipeDetector()
+                self.swipe_detector = TemporalSwipeDetector()
+                self.swipe_source = "temporal"
+                log.info("swipe_detector_selected", source="temporal-learned")
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "temporal_swipe_unavailable",
+                    error=str(exc),
+                    note="falling back to rule-based swipe detector",
+                )
+                from sigil.intelligence.swipe_detector import SwipeDetector
+
+                self.swipe_detector = SwipeDetector()
+                self.swipe_source = "rule-based"
 
         # Tier 3: pointer detector with defensive initialisation.
         self.pointer_detector = None

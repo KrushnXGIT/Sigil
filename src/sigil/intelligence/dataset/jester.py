@@ -4,23 +4,33 @@ Per ADR-0012, V1's dynamic gesture classifier trains on the 20BN-Jester
 dataset. Jester's original Twenty Billion Neurons download host is
 unreliable; Kaggle mirrors are the practical source today.
 
-This module:
-    print_download_instructions()  — show how to get the data
-    validate_jester_layout()       — sanity-check a downloaded copy
-    parse_jester_csv()             — parse the train/val label CSVs
-    filter_to_v1_classes()         — keep only the 5 V1 classes
+This module targets the **Kaggle mirror layout** (toxicmender/20bn-jester
+and equivalents), which differs from the original 20BN distribution:
 
-We do NOT auto-download Jester. It requires Kaggle auth (via the
-`kaggle` CLI or a manual browser session) and ~5 GB of bandwidth.
-A clear instruction set is more reliable than fragile auth-handling
-code.
+    <root>/
+        Train.csv            # comma-separated, WITH header row
+        Validation.csv
+        Test.csv             # labels present in this mirror
+        Train/<video_id>/00001.jpg ...     # per-split video folders
+        Validation/<video_id>/...
+        Test/<video_id>/...
 
-Filename conventions (Jester convention, preserved):
-    jester-v1-labels.csv        — list of all 27 class names
-    jester-v1-train.csv         — train split (video_id;label_text)
-    jester-v1-validation.csv    — val split
-    jester-v1-test.csv          — test split (unlabeled in some mirrors)
-    20bn-jester-v1/<video_id>/  — per-video folder with JPG frames
+CSV columns (header row present):
+    video_id,label,frames,label_id,shape,format
+We use only video_id (col 0) and label (col 1, full text e.g.
+"Swiping Left"). The shape column contains an internal comma inside
+quotes — csv.reader handles the quoting correctly.
+
+Note the key structural point: unlike the original Jester (one shared
+videos folder), this mirror stores each split's videos in its own
+folder. So the videos directory is resolved *per split*.
+
+Public API:
+    print_download_instructions()
+    validate_jester_layout()
+    videos_dir_for_split() / csv_path_for_split()
+    parse_jester_csv()
+    filter_to_v1_classes()
 """
 
 from __future__ import annotations
@@ -36,8 +46,10 @@ log = get_logger(__name__)
 
 # --- V1 class mapping ------------------------------------------------------
 
-# The 5 classes V1.0 trains on. Jester labels (left of arrow) map to the
-# Sigil gesture names (right of arrow) the daemon/interpreter expect.
+# The 5 classes V1.0 trains on. Jester labels (left) map to the Sigil
+# gesture names (right) the daemon/interpreter expect. Label strings
+# must match the CSV's `label` column EXACTLY (verified against this
+# mirror's Train.csv).
 JESTER_TO_SIGIL_V1: dict[str, str] = {
     "Swiping Left": "swipe_left",
     "Swiping Right": "swipe_right",
@@ -46,20 +58,25 @@ JESTER_TO_SIGIL_V1: dict[str, str] = {
     "Doing other things": "no_dynamic_gesture",
 }
 
-# Sigil-side class names in the order the model emits them.
-# Order is alphabetical for determinism — the trainer rebuilds this
-# from the parquet label column, but having a canonical order makes
-# debugging easier.
-SIGIL_V1_CLASSES: tuple[str, ...] = tuple(sorted(set(JESTER_TO_SIGIL_V1.values())))
+# Sigil-side class names in deterministic (alphabetical) order.
+SIGIL_V1_CLASSES: tuple[str, ...] = tuple(
+    sorted(set(JESTER_TO_SIGIL_V1.values()))
+)
 
-# Standard Jester directory + file names. These match the layout
-# produced by the Kaggle mirrors and the original 20BN distribution.
-ANNOTATIONS_DIRNAME = "annotations"
-VIDEOS_DIRNAME = "20bn-jester-v1"
-LABELS_FILE = "jester-v1-labels.csv"
-TRAIN_CSV = "jester-v1-train.csv"
-VAL_CSV = "jester-v1-validation.csv"
-TEST_CSV = "jester-v1-test.csv"
+# --- Kaggle-mirror layout --------------------------------------------------
+
+# Per-split folder + CSV names. The original Jester used a single
+# 20bn-jester-v1/ folder and annotations/ dir; this mirror does not.
+SPLIT_DIRNAMES: dict[str, str] = {
+    "train": "Train",
+    "val": "Validation",
+    "test": "Test",
+}
+SPLIT_CSV_NAMES: dict[str, str] = {
+    "train": "Train.csv",
+    "val": "Validation.csv",
+    "test": "Test.csv",
+}
 
 
 class JesterError(RuntimeError):
@@ -74,7 +91,7 @@ class JesterRecord:
     video_dir: Path
     jester_label: str
     sigil_label: str
-    split: str  # "train" | "val" | "test"
+    split: str   # "train" | "val" | "test"
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,45 +106,60 @@ class JesterStats:
 
 
 # ---------------------------------------------------------------------------
-# Instructions (no auto-download — see module docstring)
+# Layout helpers
+# ---------------------------------------------------------------------------
+
+
+def videos_dir_for_split(root: Path, split: str) -> Path:
+    """Return the per-split video folder, e.g. <root>/Train."""
+    try:
+        return root / SPLIT_DIRNAMES[split]
+    except KeyError:
+        raise JesterError(
+            f"Unknown split {split!r}. Valid: {list(SPLIT_DIRNAMES)}",
+        ) from None
+
+
+def csv_path_for_split(root: Path, split: str) -> Path:
+    """Return the per-split CSV path, e.g. <root>/Train.csv."""
+    try:
+        return root / SPLIT_CSV_NAMES[split]
+    except KeyError:
+        raise JesterError(
+            f"Unknown split {split!r}. Valid: {list(SPLIT_CSV_NAMES)}",
+        ) from None
+
+
+# ---------------------------------------------------------------------------
+# Instructions
 # ---------------------------------------------------------------------------
 
 
 def print_download_instructions(dest: Path) -> str:
-    """Return a human-readable instruction string for getting Jester.
-
-    Doesn't print directly so callers can decide whether to log, print,
-    or include in an error message.
-    """
+    """Return a human-readable instruction string for getting Jester."""
     return (
         "20BN-Jester is not auto-downloaded — requires Kaggle auth or a\n"
-        "manual mirror. Pick one of these paths:\n"
+        "manual mirror. Recommended source: the Kaggle mirror\n"
+        "'toxicmender/20bn-jester'.\n"
         "\n"
-        "Option A — Kaggle CLI (recommended if you have a Kaggle account):\n"
-        "  1. Install: pip install kaggle\n"
-        "  2. Place your API token at ~/.kaggle/kaggle.json (Windows: \n"
-        "     %USERPROFILE%\\.kaggle\\kaggle.json). Generate one at\n"
-        "     https://www.kaggle.com/settings under 'API'.\n"
-        "  3. Download:\n"
+        "Option A — Kaggle CLI:\n"
+        "  1. pip install kaggle\n"
+        "  2. Put your API token at %USERPROFILE%\\.kaggle\\kaggle.json\n"
+        "     (generate at https://www.kaggle.com/settings under 'API').\n"
+        "  3. Download + unzip:\n"
         f"     kaggle datasets download -d toxicmender/20bn-jester -p {dest}\n"
-        f"     cd {dest} && unzip 20bn-jester.zip\n"
+        f"     cd {dest} && tar -xf 20bn-jester.zip   (or unzip)\n"
         "\n"
-        "Option B — Manual browser download:\n"
-        "  1. Go to https://www.kaggle.com/datasets/toxicmender/20bn-jester\n"
-        "  2. Click Download (Kaggle account required, but free).\n"
-        f"  3. Unzip the archive into {dest}\n"
+        "Option B — Manual browser download from the same Kaggle page.\n"
         "\n"
-        "Either way, the final layout should be:\n"
+        "Final layout expected by this module:\n"
         f"  {dest}/\n"
-        f"    annotations/\n"
-        f"      jester-v1-labels.csv\n"
-        f"      jester-v1-train.csv\n"
-        f"      jester-v1-validation.csv\n"
-        f"    20bn-jester-v1/\n"
-        f"      1/00001.jpg ... 1/00036.jpg\n"
-        f"      2/00001.jpg ... etc.\n"
+        "    Train.csv  Validation.csv  Test.csv\n"
+        "    Train/<video_id>/00001.jpg ...\n"
+        "    Validation/<video_id>/...\n"
+        "    Test/<video_id>/...\n"
         "\n"
-        "Run `sigil dataset-v1 validate` to verify the layout once unzipped."
+        "Run `sigil dataset-v1 validate` to verify once unzipped."
     )
 
 
@@ -137,62 +169,54 @@ def print_download_instructions(dest: Path) -> str:
 
 
 def validate_jester_layout(root: Path) -> None:
-    """Verify that a directory looks like a complete Jester distribution.
+    """Verify a directory matches the Kaggle-mirror Jester layout.
 
     Raises JesterError with a specific message if anything's wrong.
+    Requires train + val (folders and CSVs); test is optional.
     """
     if not root.is_dir():
         raise JesterError(
             f"Jester root not found at {root}.\n\n{print_download_instructions(root)}",
         )
 
-    annotations = root / ANNOTATIONS_DIRNAME
-    videos = root / VIDEOS_DIRNAME
-    if not annotations.is_dir():
-        raise JesterError(
-            f"Expected annotations dir at {annotations}.\n"
-            "The Kaggle mirror unzips into a folder named '20bn-jester-v1' — "
-            "ensure it's the parent of annotations/, not nested under it.",
-        )
-    if not videos.is_dir():
-        raise JesterError(
-            f"Expected videos dir at {videos}.\n"
-            "The Kaggle mirror should produce a 20bn-jester-v1/ folder with "
-            "tens of thousands of numbered subdirectories.",
-        )
-
-    # Required CSVs.
-    for fname in (LABELS_FILE, TRAIN_CSV, VAL_CSV):
-        path = annotations / fname
-        if not path.is_file():
+    # Required: train + val CSVs at root.
+    for split in ("train", "val"):
+        csv_path = csv_path_for_split(root, split)
+        if not csv_path.is_file():
             raise JesterError(
-                f"Missing label CSV at {path}. "
-                "Some Kaggle mirrors omit the test CSV but the train/val/labels "
-                "files are required.",
+                f"Missing {csv_path.name} at {csv_path}.\n"
+                f"Expected the Kaggle-mirror layout with Train.csv / "
+                f"Validation.csv at the dataset root.",
             )
 
-    # Spot-check a few video directories exist + contain JPGs.
-    sample_video_dirs = sorted(videos.iterdir())[:5]
-    if not sample_video_dirs:
-        raise JesterError(
-            f"{videos} is empty. The Kaggle mirror archive may not have "
-            "unzipped fully — check archive integrity.",
-        )
-    for vd in sample_video_dirs:
-        if not vd.is_dir():
-            continue
-        jpgs = list(vd.glob("*.jpg"))
-        if not jpgs:
+    # Required: train + val video folders.
+    for split in ("train", "val"):
+        vdir = videos_dir_for_split(root, split)
+        if not vdir.is_dir():
             raise JesterError(
-                f"Video dir {vd} has no .jpg frames — unzip may be partial.",
+                f"Missing video folder {vdir.name}/ at {vdir}.\n"
+                f"This mirror stores each split's videos in its own "
+                f"folder (Train/, Validation/, Test/).",
             )
-        break  # one good sample is enough
 
-    log.info(
-        "jester_layout_validated",
-        annotations=str(annotations),
-        videos=str(videos),
-    )
+    # Spot-check that the train folder has video subdirs with JPGs.
+    train_videos = videos_dir_for_split(root, "train")
+    sample = sorted(p for p in train_videos.iterdir() if p.is_dir())[:5]
+    if not sample:
+        raise JesterError(
+            f"{train_videos} has no video subdirectories — the unzip "
+            f"may be incomplete.",
+        )
+    for vd in sample:
+        if list(vd.glob("*.jpg")):
+            break
+    else:
+        raise JesterError(
+            f"No .jpg frames found in sampled video dirs under "
+            f"{train_videos} — unzip may be partial.",
+        )
+
+    log.info("jester_layout_validated", root=str(root), mirror="kaggle-split")
 
 
 # ---------------------------------------------------------------------------
@@ -207,16 +231,18 @@ def parse_jester_csv(
     sigil_label_for: dict[str, str],
     split: str,
 ) -> tuple[list[JesterRecord], JesterStats]:
-    """Parse one of Jester's split CSV files.
+    """Parse one split CSV (Train.csv / Validation.csv / Test.csv).
 
-    The CSVs are semicolon-separated; some mirrors are comma-separated.
-    We try semicolon first, fall back to comma.
+    The mirror's CSVs are comma-separated, carry a header row
+    (video_id,label,frames,label_id,shape,format), and use full-text
+    labels. The `shape` field contains an internal comma inside quotes;
+    csv.reader handles that correctly.
 
     Args:
-        csv_path: path to jester-v1-train.csv (or val/test).
-        videos_dir: 20bn-jester-v1/ directory.
-        sigil_label_for: map from Jester label to Sigil name. Labels
-            not in this map are skipped (counted in stats).
+        csv_path: path to the split CSV.
+        videos_dir: the per-split video folder (e.g. <root>/Train).
+        sigil_label_for: map Jester label → Sigil name. Labels not in
+            this map are skipped (counted in stats).
         split: "train" | "val" | "test", attached to each record.
 
     Returns:
@@ -232,45 +258,42 @@ def parse_jester_csv(
     skipped_unknown = 0
     skipped_missing = 0
 
-    text = csv_path.read_text(encoding="utf-8")
-    # Detect delimiter by inspecting the first line.
-    first_line = text.splitlines()[0] if text else ""
-    delimiter = ";" if first_line.count(";") >= first_line.count(",") else ","
+    with csv_path.open(encoding="utf-8", newline="") as fh:
+        reader = csv.reader(fh, delimiter=",")
+        for row_idx, row in enumerate(reader):
+            if not row or len(row) < 2:
+                continue
+            video_id = row[0].strip()
+            label = row[1].strip()
 
-    reader = csv.reader(text.splitlines(), delimiter=delimiter)
-    for row_idx, row in enumerate(reader):
-        if not row or len(row) < 2:
-            continue
-        video_id = row[0].strip()
-        label = row[1].strip()
-        per_jester[label] = per_jester.get(label, 0) + 1
+            # Skip the header row.
+            if row_idx == 0 and video_id.lower() == "video_id":
+                continue
 
-        sigil_label = sigil_label_for.get(label)
-        if sigil_label is None:
-            skipped_unknown += 1
-            continue
+            per_jester[label] = per_jester.get(label, 0) + 1
 
-        video_dir = videos_dir / video_id
-        if not video_dir.is_dir():
-            skipped_missing += 1
-            log.debug(
-                "skipping_missing_video",
-                csv=str(csv_path),
-                video_id=video_id,
-                row=row_idx,
-            )
-            continue
+            sigil_label = sigil_label_for.get(label)
+            if sigil_label is None:
+                skipped_unknown += 1
+                continue
 
-        records.append(
-            JesterRecord(
+            video_dir = videos_dir / video_id
+            if not video_dir.is_dir():
+                skipped_missing += 1
+                log.debug(
+                    "skipping_missing_video",
+                    csv=str(csv_path), video_id=video_id, row=row_idx,
+                )
+                continue
+
+            records.append(JesterRecord(
                 video_id=video_id,
                 video_dir=video_dir,
                 jester_label=label,
                 sigil_label=sigil_label,
                 split=split,
-            )
-        )
-        per_sigil[sigil_label] += 1
+            ))
+            per_sigil[sigil_label] += 1
 
     stats = JesterStats(
         total_records=len(records),
@@ -281,8 +304,7 @@ def parse_jester_csv(
     )
     log.info(
         "jester_csv_parsed",
-        csv=csv_path.name,
-        split=split,
+        csv=csv_path.name, split=split,
         records=len(records),
         skipped_unknown=skipped_unknown,
         skipped_missing=skipped_missing,
@@ -299,16 +321,16 @@ def filter_to_v1_classes(
 ) -> list[JesterRecord]:
     """Cap per-class record count, balancing if max_per_class is set.
 
-    With ~5,000 examples per Jester class and 5 classes total, the
-    full set is ~25,000 records per split. For quick pipeline
-    validation runs, pass max_per_class=50 (250 total) to validate
-    the pipeline in ~5 minutes.
+    The full mirror has ~5,000 examples per Jester class. For a quick
+    pipeline-validation run pass max_per_class=50 (250 total) to test
+    the pipeline in ~5 minutes. To keep preprocessing tractable on CPU,
+    a value around 1500–2000 gives a strong model in ~1–2 hours rather
+    than the full ~8–12 hours.
     """
     if max_per_class is None:
         return records
 
     import random
-
     rng = random.Random(seed)
     by_class: dict[str, list[JesterRecord]] = {}
     for r in records:
@@ -327,19 +349,17 @@ def filter_to_v1_classes(
 
 
 __all__ = [
-    "ANNOTATIONS_DIRNAME",
     "JESTER_TO_SIGIL_V1",
-    "LABELS_FILE",
     "SIGIL_V1_CLASSES",
-    "TEST_CSV",
-    "TRAIN_CSV",
-    "VAL_CSV",
-    "VIDEOS_DIRNAME",
+    "SPLIT_CSV_NAMES",
+    "SPLIT_DIRNAMES",
     "JesterError",
     "JesterRecord",
     "JesterStats",
+    "csv_path_for_split",
     "filter_to_v1_classes",
     "parse_jester_csv",
     "print_download_instructions",
     "validate_jester_layout",
+    "videos_dir_for_split",
 ]
